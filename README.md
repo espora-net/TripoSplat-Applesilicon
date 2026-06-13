@@ -75,8 +75,38 @@ Notes:
 - A couple of ops have no MPS kernel yet (`deform_conv2d`, `index_copy_`). These
   are handled directly in the code, and `PYTORCH_ENABLE_MPS_FALLBACK=1` is set at
   import time as a safety net for any other gap (export `=0` to opt out).
+- **Attention is tiled to fit unified memory.** MPS has no fused/flash-attention
+  kernel, so PyTorch would materialise the full `(heads, tokens, tokens)` score
+  tensor — several GB for the flow DiT's ~12k-token sequence — and OOM. On MPS
+  the pipeline transparently query-tiles attention (numerically identical) and
+  flushes the allocator pool between stages. Tune the per-attention score budget
+  with `TRIPOSPLAT_SDPA_BUDGET_MB` (default `1536`): raise it (e.g. `4096`) for
+  marginally fewer tiles, lower it (e.g. `768`) if a very large multi-view job
+  still OOMs. It does **not** materially change speed — see below.
 - A 16 GB+ unified-memory Mac is recommended; 36 GB comfortably runs single-image
   and 2–3 view multi-view generation at full resolution.
+
+### Performance on Apple Silicon
+
+The flow-matching DiT is the same fixed-cost transformer regardless of Gaussian
+count, and it is genuinely compute-heavy (~12k tokens × tens of layers × two
+guidance passes per step). On an M3 Pro the GPU runs near its **practical
+ceiling (~4–5 TFLOP/s sustained)** — it is compute-bound, not idle — so a single
+sampler step takes tens of seconds. Treat this as an **offline asset tool**, not
+a real-time one. Rough single-image wall-clock on an M3 Pro (36 GB), plus a
+one-time ~1–2 min encode:
+
+| Preset   | Steps | ≈ time on M3 Pro |
+|----------|-------|------------------|
+| `low`    | 10    | ~10–12 min       |
+| `medium` | 20    | ~20–22 min       |
+| `high`   | 30    | ~30–33 min       |
+
+M-series **Max/Ultra** chips have several times the GPU throughput and scale down
+proportionally. The cheapest way to go faster is **fewer sampler steps** (cost is
+linear — pick a lower preset or pass `steps=`); multi-view adds conditioning
+tokens and grows the per-step cost too.
+
 
 
 ## Multi-view input & quality presets
