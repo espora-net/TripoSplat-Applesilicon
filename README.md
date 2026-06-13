@@ -11,6 +11,9 @@ TripoSplat converts a single 2D image into high-quality and variable number of 3
 
 ## Highlights
 - **High-quality, versatile generation** that handles a wide range of image styles.
+- **Single- or multi-view input**: fuse several photos of the same object (front / side / back) for more complete, higher-quality geometry — or keep using a single image.
+- **General quality presets** (`low` / `medium` / `high`, plus Spanish aliases `baja` / `media` / `alta`) that tune sampler steps and Gaussian count in one switch.
+- **Runs natively on Apple Silicon (M-series) via the MPS GPU backend** — no CUDA required. The same code auto-selects CUDA, MPS, or CPU.
 - **Arbitrary Gaussian count** (up to 262,144) — trade off visual quality against rendering cost according to your need.
 - **Minimal, readable code**: two files (`triposplat.py` and `model.py`), ~2,000 LOC total. Easy to customize and integrate into other ecosystems.
 - **Near-zero dependencies**: no `transformers`, no `diffusers`, no version-conflict hell. Runs on any platform.
@@ -51,12 +54,84 @@ viewer — e.g. [SparkJS](https://sparkjs.dev) or
 [SuperSplat](https://superspl.at/editor).
 
 
+## Apple Silicon (MPS)
+
+TripoSplat runs natively on Apple-Silicon Macs (M1/M2/M3/M4) using PyTorch's
+**MPS** GPU backend — no CUDA needed. Device selection is automatic:
+
+```python
+from triposplat import TripoSplatPipeline
+pipe = TripoSplatPipeline(..., device="auto")   # cuda → mps → cpu
+```
+
+`device="auto"` (the default) prefers CUDA, then Apple-Silicon MPS, then CPU, so
+the same script runs unchanged on an NVIDIA box or a Mac. fp16/bf16 weights are
+kept on CUDA and MPS and promoted to fp32 on CPU.
+
+Notes:
+- Install the standard macOS PyTorch wheels (`pip install torch torchvision`);
+  MPS support is built in.
+- A couple of ops have no MPS kernel yet (`deform_conv2d`, `index_copy_`). These
+  are handled directly in the code, and `PYTORCH_ENABLE_MPS_FALLBACK=1` is set at
+  import time as a safety net for any other gap (export `=0` to opt out).
+- A 16 GB+ unified-memory Mac is recommended; 36 GB comfortably runs single-image
+  and 2–3 view multi-view generation at full resolution.
+
+
+## Multi-view input & quality presets
+
+Pass **several photos of the same object** as a list to fuse them into one model
+— the denoiser attends to every view at once, producing more complete geometry
+than a single image. Combine with a quality preset for a one-switch quality/cost
+trade-off:
+
+```python
+# Single image (unchanged behaviour)
+gaussian, prepared = pipe.run("photo.png", quality="high")
+
+# Multi-view fusion for maximum quality (front / side / back / rear …)
+views = ["front.jpg", "side.jpg", "back.jpg"]
+gaussian, prepared = pipe.run(views, quality="high")   # `prepared` is a list here
+```
+
+Quality presets (`quality=`):
+
+| Preset | Aliases (EN / ES)            | Steps | Gaussians |
+|--------|------------------------------|-------|-----------|
+| `low`    | `min`, `fast`, `draft` / `baja`   | 10  | 32,768  |
+| `medium` | `normal`, `balanced` / `media`    | 20  | 131,072 |
+| `high`   | `max`, `best`, `ultra` / `alta`   | 30  | 262,144 |
+
+Any explicit argument (`steps`, `guidance_scale`, `shift`, `num_gaussians`)
+overrides the preset; omitting `quality` keeps the original defaults. Multi-view
+attention cost grows with the number of views — on a 36 GB Mac prefer 2–3
+full-resolution views; reduce the view count, lower the preset, or downscale the
+inputs if you hit an out-of-memory error.
+
+### Example: multi-view sneaker
+
+A ready-made multi-view example uses the catalogue photos of the green
+**adidas Tokyo** sneaker. The images are copyrighted (© adidas / El Corte
+Inglés), so they are **not** committed — download them locally on demand:
+
+```bash
+python download_example_images.py        # whole-shoe views → static/example_inputs/multiview/...
+python run_example.py                    # picks up the downloaded views automatically
+```
+
+The downloaded folder is git-ignored and includes an `ATTRIBUTION.txt`; use the
+images for local testing only and respect the original copyright.
+
+
 ## Gradio Demo
 
 ```bash
 pip install gradio
 python run_gradio.py
 ```
+
+The demo exposes the **quality preset** dropdown and an **extra-views** uploader
+for multi-view fusion, alongside the existing single-image controls.
 
 ## License
 TripoSplat code and weight models are released under the [MIT License](https://github.com/VAST-AI-Research/TripoSplat/blob/main/LICENSE).

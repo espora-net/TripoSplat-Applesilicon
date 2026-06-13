@@ -1,14 +1,16 @@
 """TripoSplat Gradio demo with Spark.js in-browser viewer.
 Usage: python run_gradio.py
 """
+import os
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+
 import time
 from pathlib import Path
 from uuid import uuid4
 
 import gradio as gr
-import torch
 
-from triposplat import TripoSplatPipeline
+from triposplat import TripoSplatPipeline, quality_preset_names
 
 
 # ----------------------------------------------------------------------------
@@ -21,7 +23,7 @@ PIPE = TripoSplatPipeline(
     dinov3_path            = "ckpts/clip_vision/dino_v3_vit_h.safetensors",
     flux2_vae_encoder_path = "ckpts/vae/flux2-vae.safetensors",
     rmbg_path              = "ckpts/background_removal/birefnet.safetensors",
-    device                 = "cuda",
+    device                 = "auto",
 )
 
 OUT_ROOT     = Path("gradio_outputs").resolve()
@@ -60,23 +62,50 @@ def _viewer_iframe(ply_path: Path) -> str:
 # Event handlers
 # ----------------------------------------------------------------------------
 
-def generate(image, seed: int, steps: int, guidance_scale: float,
-             num_gaussians: int, output_format: str,
+QUALITY_CHOICES = ["custom"] + quality_preset_names()
+
+
+def _collect_views(image, extra_files):
+    """Build the ordered list of input views from the single image + extra uploads."""
+    views = []
+    if image is not None:
+        views.append(image)
+    for f in extra_files or []:
+        # gr.File(type="filepath") yields paths (or objects exposing `.name`).
+        views.append(getattr(f, "name", f))
+    return views
+
+
+def generate(image, extra_files, seed: int, quality: str, steps: int,
+             guidance_scale: float, num_gaussians: int, output_format: str,
              progress=gr.Progress(track_tqdm=True)):
-    """Run the full pipeline (preprocess + encode + sample + decode)."""
-    if image is None:
-        raise gr.Error("Please upload an image first.")
+    """Run the full pipeline (preprocess + encode + sample + decode).
+
+    Supports single- or multi-view input and quality presets. When `quality` is
+    ``"custom"`` the manual sliders drive the run; otherwise the chosen preset
+    fills in steps + gaussian count.
+    """
+    views = _collect_views(image, extra_files)
+    if not views:
+        raise gr.Error("Please upload at least one image first.")
+
+    if quality == "custom":
+        run_kwargs = dict(steps=int(steps), guidance_scale=float(guidance_scale),
+                          num_gaussians=int(num_gaussians))
+    else:
+        run_kwargs = dict(quality=quality)
 
     progress(0, desc="Generating...")
     t0 = time.time()
-    prepared = PIPE.preprocess_image(image)
-    gen = torch.Generator(device=PIPE._device).manual_seed(int(seed))
-    cond = PIPE.encode_image(prepared, generator=gen)
-    out  = PIPE.sample_latent(cond, steps=int(steps),
-                              guidance_scale=float(guidance_scale),
-                              generator=gen, show_progress=True)
-    gaussian = PIPE.decode_latent(out["latent"], num_gaussians=int(num_gaussians))
+    payload = views if len(views) > 1 else views[0]
+    try:
+        gaussian, prepared = PIPE.run(payload, seed=int(seed), show_progress=True,
+                                      **run_kwargs)
+    except RuntimeError as e:
+        raise gr.Error(str(e))
     gen_dt = time.time() - t0
+
+    prepared_list = prepared if isinstance(prepared, list) else [prepared]
 
     out_dir = OUT_ROOT / uuid4().hex[:12]
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -92,9 +121,11 @@ def generate(image, seed: int, steps: int, guidance_scale: float,
     else:
         raise gr.Error(f"Unknown output format: {output_format}")
 
-    info = (f"{gaussian.get_xyz.shape[0]:,} gaussians  ·  "
+    views_note = f"{len(views)} views  ·  " if len(views) > 1 else ""
+    info = (f"{views_note}{gaussian.get_xyz.shape[0]:,} gaussians  ·  "
             f"generation: {gen_dt:.1f}s  ·  saved: {download_path.name}")
-    return prepared, _viewer_iframe(ply_path), gr.update(value=str(download_path), interactive=True), info
+    return (prepared_list, _viewer_iframe(ply_path),
+            gr.update(value=str(download_path), interactive=True), info)
 
 
 # ----------------------------------------------------------------------------
@@ -113,6 +144,10 @@ with gr.Blocks(title="TripoSplat") as demo:
         with gr.Column(scale=1):
             image_in = gr.Image(label="Input image", type="pil", image_mode="RGBA",
                                 height=320)
+            extra_files_in = gr.File(
+                label="Extra views (optional, multi-view fusion for max quality)",
+                file_count="multiple", file_types=["image"], type="filepath",
+            )
 
             gr.Examples(
                 examples=[[p] for p in EXAMPLES],
@@ -122,7 +157,14 @@ with gr.Blocks(title="TripoSplat") as demo:
                 cache_examples=False,
             )
 
-            with gr.Accordion("Sampling settings", open=False):
+            quality_in = gr.Dropdown(
+                label="Quality preset",
+                choices=QUALITY_CHOICES,
+                value="high",
+                info="Presets set steps + gaussian count. Pick 'custom' to use the sliders below.",
+            )
+
+            with gr.Accordion("Sampling settings (used when quality = custom)", open=False):
                 seed_in = gr.Number(label="Seed", value=42, precision=0)
                 steps_in = gr.Slider(label="Inference steps", minimum=1, maximum=50, step=1, value=20)
                 cfg_in = gr.Slider(label="Guidance scale", minimum=1.0, maximum=10.0, step=0.5, value=3.0)
@@ -134,7 +176,8 @@ with gr.Blocks(title="TripoSplat") as demo:
                 fmt_in = gr.Dropdown(label="Download format", choices=["ply", "splat"], value="ply")
 
             run_btn = gr.Button("Generate", variant="primary")
-            prepared_out = gr.Image(label="Preprocessed input", interactive=False, height=240)
+            prepared_out = gr.Gallery(label="Preprocessed input(s)", interactive=False,
+                                      height=240, columns=4)
             info_out = gr.Markdown()
 
         with gr.Column(scale=2):
@@ -143,7 +186,7 @@ with gr.Blocks(title="TripoSplat") as demo:
 
     run_btn.click(
         fn=generate,
-        inputs=[image_in, seed_in, steps_in, cfg_in, num_g_in, fmt_in],
+        inputs=[image_in, extra_files_in, seed_in, quality_in, steps_in, cfg_in, num_g_in, fmt_in],
         outputs=[prepared_out, viewer_out, file_out, info_out],
     )
 

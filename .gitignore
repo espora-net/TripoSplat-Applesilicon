@@ -216,3 +216,22 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ---------------------------------------------------------------------------
+# TripoSplat project
+# ---------------------------------------------------------------------------
+# Model weights (downloaded separately, large)
+ckpts/
+
+# Downloaded multi-view example photos (copyrighted retailer/brand images,
+# fetched on demand by download_example_images.py — never commit them)
+static/example_inputs/multiview/
+
+# Generated outputs
+gradio_outputs/
+output*.ply
+output*.splat
+output_multiview.*
+preprocessed_image.webp
+preprocessed_view_*.webp
+*.splat

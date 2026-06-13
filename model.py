@@ -571,6 +571,26 @@ class _SwinLarge(nn.Module):
 
 # -- ASPP-Deformable -----------------------------------------------------------
 
+def _deform_conv2d_compat(input, offset, weight, bias, *, stride, padding, mask):
+    """`deform_conv2d` that also works on accelerators without a native kernel.
+
+    torchvision ships `deform_conv2d` only for CPU and CUDA. On other devices
+    (notably Apple Silicon / MPS) the single op is evaluated on the CPU in fp32
+    and the result moved back, so the surrounding backbone stays on the GPU.
+    """
+    if input.device.type in ("cpu", "cuda"):
+        return deform_conv2d(input=input, offset=offset, weight=weight, bias=bias,
+                             padding=padding, mask=mask, stride=stride)
+    dev, dt = input.device, input.dtype
+    out = deform_conv2d(
+        input=input.float().cpu(), offset=offset.float().cpu(),
+        weight=weight.float().cpu(),
+        bias=None if bias is None else bias.float().cpu(),
+        padding=padding, mask=mask.float().cpu(), stride=stride,
+    )
+    return out.to(device=dev, dtype=dt)
+
+
 class _DeformableConv2d(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, bias=False):
         super().__init__()
@@ -588,9 +608,9 @@ class _DeformableConv2d(nn.Module):
     def forward(self, x):
         offset = self.offset_conv(x)
         modulator = 2.0 * torch.sigmoid(self.modulator_conv(x))
-        return deform_conv2d(
-            input=x, offset=offset,
-            weight=self.regular_conv.weight, bias=self.regular_conv.bias,
+        return _deform_conv2d_compat(
+            x, offset,
+            self.regular_conv.weight, self.regular_conv.bias,
             padding=self.padding, mask=modulator, stride=self.stride,
         )
 
@@ -1216,7 +1236,9 @@ def sample_probs(probs, counts, algo="systematic"):
         idx = torch.searchsorted(cdf_rows, us).clamp_max(probs.size(1) - 1)
         buf = torch.zeros(r, P, dtype=torch.float32, device=device)
         buf.scatter_add_(1, idx, torch.ones_like(idx, dtype=buf.dtype))
-        out.index_copy_(0, rows, buf.to(torch.long))
+        # Equivalent to out.index_copy_(0, rows, ...) but uses index_put, which
+        # (unlike index_copy_) has a native Apple-Silicon / MPS kernel.
+        out[rows] = buf.to(torch.long)
 
     return out.view(*batch_shape, P)
 

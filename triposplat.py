@@ -1,3 +1,10 @@
+import os
+
+# Apple Silicon (MPS) ships no kernel for a couple of ops used here. Enabling the
+# fallback *before* torch is imported lets those ops transparently run on the CPU
+# instead of raising. Export PYTORCH_ENABLE_MPS_FALLBACK=0 to opt out.
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -14,17 +21,103 @@ from model import (
 
 
 # ---------------------------------------------------------------------------
+# Device / dtype resolution
+# ---------------------------------------------------------------------------
+
+def resolve_device(device="auto") -> torch.device:
+    """Resolve a device spec to a concrete ``torch.device``.
+
+    ``"auto"`` (the default) prefers CUDA, then Apple-Silicon MPS, then CPU, so
+    the same code runs natively on an NVIDIA box or a Mac without changes.
+    """
+    if device is None or device == "auto":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        mps = getattr(torch.backends, "mps", None)
+        if mps is not None and mps.is_available():
+            return torch.device("mps")
+        return torch.device("cpu")
+    return torch.device(device)
+
+
+def _dtype_for_device(intended: torch.dtype, device: torch.device) -> torch.dtype:
+    """Map an intended low-precision dtype to one the device handles well.
+
+    CUDA and MPS keep fp16/bf16. CPU has poor/absent half-precision kernels, so
+    weights are promoted to fp32 there.
+    """
+    if device.type == "cpu":
+        return torch.float32
+    return intended
+
+
+# ---------------------------------------------------------------------------
+# Quality presets
+# ---------------------------------------------------------------------------
+
+# General-purpose quality presets. They only tune the cost/quality knobs the
+# pipeline already exposes (sampler steps and Gaussian count), so they compose
+# with everything else and never change behaviour the caller sets explicitly.
+QUALITY_PRESETS = {
+    "low":    dict(steps=10, guidance_scale=3.0, shift=3.0, num_gaussians=32768),
+    "medium": dict(steps=20, guidance_scale=3.0, shift=3.0, num_gaussians=131072),
+    "high":   dict(steps=30, guidance_scale=3.0, shift=3.0, num_gaussians=262144),
+}
+
+# Friendly aliases (English + Spanish) → canonical preset name.
+_QUALITY_ALIASES = {
+    "min": "low", "baja": "low", "fast": "low", "draft": "low", "rapida": "low", "rápida": "low",
+    "med": "medium", "media": "medium", "normal": "medium", "balanced": "medium", "default": "medium",
+    "max": "high", "maxima": "high", "máxima": "high", "alta": "high", "ultra": "high", "best": "high",
+}
+
+
+def quality_preset_names() -> list:
+    """Canonical preset names, lowest → highest quality."""
+    return ["low", "medium", "high"]
+
+
+def resolve_quality(quality) -> dict:
+    """Resolve a quality preset to a settings dict.
+
+    ``quality`` may be a canonical name (``"low"``/``"medium"``/``"high"``), an
+    English/Spanish alias (``"baja"``/``"media"``/``"alta"``/``"max"`` …), a dict
+    of explicit overrides, or ``None`` (→ empty dict, i.e. keep the defaults).
+    """
+    if quality is None:
+        return {}
+    if isinstance(quality, dict):
+        return dict(quality)
+    key = _QUALITY_ALIASES.get(str(quality).strip().lower(), str(quality).strip().lower())
+    if key not in QUALITY_PRESETS:
+        valid = ", ".join(quality_preset_names())
+        raise ValueError(
+            f"unknown quality preset {quality!r}; choose one of: {valid} "
+            f"(or aliases such as 'baja' / 'media' / 'alta' / 'max')"
+        )
+    return dict(QUALITY_PRESETS[key])
+
+
+def _first_not_none(*values):
+    for v in values:
+        if v is not None:
+            return v
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Gaussian
 # ---------------------------------------------------------------------------
 
 class Gaussian:
     def __init__(self, aabb: list, sh_degree: int = 0, mininum_kernel_size: float = 0.0,
                  scaling_bias: float = 0.01, opacity_bias: float = 0.1,
-                 scaling_activation: str = "exp", device='cuda'):
+                 scaling_activation: str = "exp", device="auto"):
         self.sh_degree = sh_degree
         self.mininum_kernel_size = mininum_kernel_size
         self.scaling_bias = scaling_bias
         self.opacity_bias = opacity_bias
+        device = resolve_device(device)
         self.device = device
         self.aabb = torch.tensor(aabb, dtype=torch.float32, device=device)
 
@@ -478,6 +571,41 @@ def encode_image(image: Image.Image, dinov3: DinoV3ViT, vae_encoder: Flux2VAEEnc
     return {'feature1': dinov3_feat, 'feature2': vae_feat}
 
 
+def _as_view_list(image) -> list:
+    """Normalize a single-image or multi-view input into a list of views.
+
+    A ``list``/``tuple`` is treated as multiple views. A 4-D tensor whose leading
+    dimension is > 1 is split into that many views. Anything else is one view.
+    """
+    if isinstance(image, (list, tuple)):
+        views = list(image)
+        if not views:
+            raise ValueError("got an empty list of images")
+        return views
+    if isinstance(image, torch.Tensor) and image.ndim == 4 and image.shape[0] > 1:
+        return [image[i] for i in range(image.shape[0])]
+    return [image]
+
+
+@torch.no_grad()
+def encode_images(images, dinov3: DinoV3ViT, vae_encoder: Flux2VAEEncoder,
+                  generator: torch.Generator = None) -> dict:
+    """Encode one or more preprocessed views into a single conditioning dict.
+
+    Multiple views are fused by concatenating their conditioning tokens along the
+    sequence dimension, so the flow model's attention sees every view at once.
+    Supplying several views of one object (e.g. front / side / back product
+    photos) gives the generator more coverage and yields higher-quality, more
+    complete geometry than a single image. A single view reproduces the original
+    single-image behaviour exactly.
+    """
+    views = _as_view_list(images)
+    feats = [encode_image(im, dinov3, vae_encoder, generator=generator) for im in views]
+    if len(feats) == 1:
+        return feats[0]
+    return {k: torch.cat([f[k] for f in feats], dim=1) for k in feats[0]}
+
+
 @torch.no_grad()
 def sample_latent(flow_model: LatentSeqMMFlowModel, cond: dict,
                   steps: int = 50, guidance_scale: float = 7.0, shift: float = 3.0,
@@ -502,19 +630,30 @@ def sample_latent(flow_model: LatentSeqMMFlowModel, cond: dict,
 
 class TripoSplatPipeline:
     def __init__(self, ckpt_path: str, decoder_path: str, dinov3_path: str,
-                 flux2_vae_encoder_path: str, rmbg_path: str, device: str = "cuda"):
-        self._device = torch.device(device)
-        self.dinov3      = load_dinov3      (dinov3_path,             device=self._device, dtype=torch.bfloat16)
-        self.vae_encoder = load_vae_encoder (flux2_vae_encoder_path,  device=self._device, dtype=torch.bfloat16)
-        self.rmbg        = load_rmbg        (rmbg_path,               device=self._device, dtype=torch.float16)
-        self.flow_model  = load_flow_model  (ckpt_path,               device=self._device, dtype=torch.float16)
-        self.decoder     = load_decoder     (decoder_path,            device=self._device, dtype=torch.float16)
+                 flux2_vae_encoder_path: str, rmbg_path: str, device: str = "auto"):
+        self._device = resolve_device(device)
+        bf16 = _dtype_for_device(torch.bfloat16, self._device)
+        fp16 = _dtype_for_device(torch.float16, self._device)
+        self.dinov3      = load_dinov3      (dinov3_path,             device=self._device, dtype=bf16)
+        self.vae_encoder = load_vae_encoder (flux2_vae_encoder_path,  device=self._device, dtype=bf16)
+        self.rmbg        = load_rmbg        (rmbg_path,               device=self._device, dtype=fp16)
+        self.flow_model  = load_flow_model  (ckpt_path,               device=self._device, dtype=fp16)
+        self.decoder     = load_decoder     (decoder_path,            device=self._device, dtype=fp16)
 
     def preprocess_image(self, image, erode_radius: int = 1) -> Image.Image:
         return preprocess_image(image, self.rmbg, erode_radius=erode_radius)
 
+    def preprocess_images(self, images, erode_radius: int = 1) -> list:
+        """Preprocess one or more views; always returns a list of RGB composites."""
+        return [self.preprocess_image(v, erode_radius=erode_radius)
+                for v in _as_view_list(images)]
+
     def encode_image(self, image: Image.Image, generator: torch.Generator = None) -> dict:
         return encode_image(image, self.dinov3, self.vae_encoder, generator=generator)
+
+    def encode_images(self, images, generator: torch.Generator = None) -> dict:
+        """Encode and fuse one or more preprocessed views into one conditioning dict."""
+        return encode_images(images, self.dinov3, self.vae_encoder, generator=generator)
 
     def sample_latent(self, cond: dict, steps: int = 50, guidance_scale: float = 7.0,
                       shift: float = 3.0, generator: torch.Generator = None,
@@ -541,19 +680,30 @@ class TripoSplatPipeline:
         return rounded
 
     @torch.no_grad()
-    def run(self, image, seed: int = 42, steps: int = 20, guidance_scale: float = 3.0,
-            shift: float = 3.0, num_gaussians=262144, erode_radius: int = 1,
-            show_progress: bool = False, callback=None):
+    def run(self, image, seed: int = 42, steps: int = None, guidance_scale: float = None,
+            shift: float = None, num_gaussians=None, erode_radius: int = 1,
+            show_progress: bool = False, callback=None, quality=None):
         """
         Args:
-            image: Input image. Accepts a file path / PIL.Image / torch.Tensor
-                (`[1,H,W,C]` or `[H,W,C]`, float in `[0, 1]`, optional alpha
-                channel as the 4th channel).
+            image: Input image, or several views of one object. Accepts a file
+                path / PIL.Image / torch.Tensor (`[1,H,W,C]` or `[H,W,C]`, float
+                in `[0, 1]`, optional alpha channel as the 4th channel), **or a
+                list/tuple of those** for multi-view fusion. Passing multiple
+                views (e.g. front / side / back photos) lets the model attend to
+                every view at once for maximum quality and more complete
+                geometry. Attention cost grows with the number of views, so on a
+                36 GB machine prefer 2–3 full-resolution views.
             seed: RNG seed for the VAE encoder's stochastic latent sampling and
                 the initial flow-matching noise. Same seed → same output.
+            quality: Optional quality preset — ``"low"`` / ``"medium"`` /
+                ``"high"`` (aliases: ``"baja"`` / ``"media"`` / ``"alta"`` /
+                ``"max"`` …), or a dict of overrides. It fills in `steps`,
+                `guidance_scale`, `shift` and `num_gaussians`; any of those passed
+                explicitly take precedence. When `quality` is ``None`` the
+                original defaults are used (steps=20, num_gaussians=262144).
             steps: Number of Euler integrator steps in the flow-matching sampler.
                 More steps → better fidelity, linear runtime cost.
-                Recommend: 10~20.
+                Recommend: 10~30.
             guidance_scale: Classifier-free-guidance strength (diffusers
                 convention). `≤ 1.0` disables CFG. Higher → more detail,
                 stronger adherence to the input image; too high can cause color
@@ -578,22 +728,39 @@ class TripoSplatPipeline:
                 `ProgressBar.update`).
 
         Returns:
-            `(gaussian, prepared_image)` for an `int` `num_gaussians`, or
-            `(list_of_gaussians, prepared_image)` for a `list` / `tuple`. The
-            second element is the RGB composite the encoders actually saw —
-            useful for display / debugging.
+            `(gaussian, prepared)` for an `int` `num_gaussians`, or
+            `(list_of_gaussians, prepared)` for a `list` / `tuple`. `prepared` is
+            the RGB composite the encoders actually saw — a single image for a
+            single input, or a list of them for multi-view input.
         """
+        preset = resolve_quality(quality)
+        steps = int(_first_not_none(steps, preset.get("steps"), 20))
+        guidance_scale = float(_first_not_none(guidance_scale, preset.get("guidance_scale"), 3.0))
+        shift = float(_first_not_none(shift, preset.get("shift"), 3.0))
+        num_gaussians = _first_not_none(num_gaussians, preset.get("num_gaussians"), 262144)
+
         if isinstance(num_gaussians, (list, tuple)):
             counts = [self._validate_num_gaussians(n) for n in num_gaussians]
         else:
             counts = [self._validate_num_gaussians(num_gaussians)]
 
         gen = torch.Generator(device=self._device).manual_seed(seed)
-        prepared = self.preprocess_image(image, erode_radius=erode_radius)
-        cond = self.encode_image(prepared, generator=gen)
-        out = self.sample_latent(cond, steps=steps, guidance_scale=guidance_scale, shift=shift,
-                                 generator=gen, show_progress=show_progress, callback=callback)
+        prepared = self.preprocess_images(image, erode_radius=erode_radius)
+        cond = self.encode_images(prepared, generator=gen)
+        try:
+            out = self.sample_latent(cond, steps=steps, guidance_scale=guidance_scale, shift=shift,
+                                     generator=gen, show_progress=show_progress, callback=callback)
+        except RuntimeError as e:
+            if len(prepared) > 1 and "out of memory" in str(e).lower():
+                raise RuntimeError(
+                    f"Out of memory while fusing {len(prepared)} views. Multi-view "
+                    f"attention cost grows with the number of views — try fewer views "
+                    f"(2–3 on 36 GB), a lower `quality` preset, or downscale the inputs."
+                ) from e
+            raise
         gaussians = [self.decode_latent(out['latent'], num_gaussians=n) for n in counts]
+
+        prepared_out = prepared[0] if len(prepared) == 1 else prepared
         if isinstance(num_gaussians, (list, tuple)):
-            return gaussians, prepared
-        return gaussians[0], prepared
+            return gaussians, prepared_out
+        return gaussians[0], prepared_out
