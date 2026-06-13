@@ -1,5 +1,6 @@
 from typing import Optional
 import math
+import os
 import re
 
 import numpy as np
@@ -916,12 +917,61 @@ def clamp_mul(x, f):
     return x * f_t + x.detach() * (f - f_t)
 
 
+def _sdpa_score_bytes_budget():
+    """Per-attention budget (bytes) for the materialised QK^T score tensor.
+
+    Tunable via ``TRIPOSPLAT_SDPA_BUDGET_MB``. Empirically (M3 Pro 36 GB) the
+    chunk *count* barely affects speed — going from ~70 chunks to ~5 only moved
+    a sampler step 76 s → 63 s — because the cost is the DiT matmuls, not the
+    tiling. So the default is chosen for memory SAFETY (headroom for multi-view,
+    where the score grows ~quadratically, and for variable system load), not for
+    a speed that tiling can't buy. ~1.5 GB keeps the live attention peak (scores
+    + probs + output ≈ 3×) well under budget after the encoders' pool is freed.
+    """
+    mb = os.environ.get("TRIPOSPLAT_SDPA_BUDGET_MB")
+    try:
+        mb = float(mb) if mb is not None else 1536.0
+    except ValueError:
+        mb = 1536.0
+    return int(max(64.0, mb) * 1024 * 1024)
+
+
+def _chunked_sdpa(q, k, v, score_bytes_budget=None):
+    """Memory-efficient attention for backends without a fused/flash kernel.
+
+    ``F.scaled_dot_product_attention`` on MPS materialises the full
+    ``(B, H, Lq, Lk)`` score tensor, which for the flow DiT's ~12k-token
+    sequence (and the GS decoder's anchor self-attention) is several GB and
+    overflows unified memory. Splitting the query dimension into chunks caps
+    that tensor to roughly the byte budget while producing identical results:
+    each query block still attends to *all* keys, so the per-row softmax is
+    unchanged.
+    """
+    if score_bytes_budget is None:
+        score_bytes_budget = _sdpa_score_bytes_budget()
+    B, H, Lq, D = q.shape
+    Lk = k.shape[-2]
+    bytes_per_query_row = max(1, B * H * Lk * q.element_size())
+    chunk = max(1, min(Lq, score_bytes_budget // bytes_per_query_row))
+    if chunk >= Lq:
+        return F.scaled_dot_product_attention(q, k, v)
+    out = torch.empty((B, H, Lq, D), dtype=q.dtype, device=q.device)
+    for start in range(0, Lq, chunk):
+        end = min(start + chunk, Lq)
+        out[:, :, start:end, :] = F.scaled_dot_product_attention(
+            q[:, :, start:end, :], k, v
+        )
+    return out
+
+
 def scaled_dot_product_attention(qkv=None, q=None, k=None, v=None, kv=None):
     if qkv is not None:
         q, k, v = qkv.unbind(dim=2)
     elif kv is not None:
         k, v = kv.unbind(dim=2)
     q, k, v = q.permute(0, 2, 1, 3), k.permute(0, 2, 1, 3), v.permute(0, 2, 1, 3)
+    if q.device.type == "mps":
+        return _chunked_sdpa(q, k, v).permute(0, 2, 1, 3)
     return F.scaled_dot_product_attention(q, k, v).permute(0, 2, 1, 3)
 
 

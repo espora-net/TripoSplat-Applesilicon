@@ -51,6 +51,24 @@ def _dtype_for_device(intended: torch.dtype, device: torch.device) -> torch.dtyp
     return intended
 
 
+def _release_memory(device: torch.device) -> None:
+    """Return cached-but-freed blocks to the OS between heavy pipeline stages.
+
+    The MPS caching allocator keeps freed transients in a pool, so the large
+    activations from the image encoders stay resident and eat into the budget
+    the flow DiT then needs. Flushing the pool between stages (encode → sample
+    → decode) keeps peak unified-memory use close to the live working set. This
+    is a no-op safety valve on CUDA/CPU. Never call it *inside* the sampler
+    loop — the pool efficiently recycles equal-sized blocks across Euler steps.
+    """
+    if device.type == "mps":
+        backend = getattr(torch, "mps", None)
+        if backend is not None and hasattr(backend, "empty_cache"):
+            backend.empty_cache()
+    elif device.type == "cuda":
+        torch.cuda.empty_cache()
+
+
 # ---------------------------------------------------------------------------
 # Quality presets
 # ---------------------------------------------------------------------------
@@ -747,6 +765,7 @@ class TripoSplatPipeline:
         gen = torch.Generator(device=self._device).manual_seed(seed)
         prepared = self.preprocess_images(image, erode_radius=erode_radius)
         cond = self.encode_images(prepared, generator=gen)
+        _release_memory(self._device)  # drop the encoders' pooled activations before the DiT
         try:
             out = self.sample_latent(cond, steps=steps, guidance_scale=guidance_scale, shift=shift,
                                      generator=gen, show_progress=show_progress, callback=callback)
@@ -758,6 +777,7 @@ class TripoSplatPipeline:
                     f"(2–3 on 36 GB), a lower `quality` preset, or downscale the inputs."
                 ) from e
             raise
+        _release_memory(self._device)  # free sampler scratch before decoding gaussians
         gaussians = [self.decode_latent(out['latent'], num_gaussians=n) for n in counts]
 
         prepared_out = prepared[0] if len(prepared) == 1 else prepared
