@@ -15,6 +15,7 @@ TripoSplat converts a single 2D image into high-quality and variable number of 3
 - **General quality presets** (`low` / `medium` / `high`, plus Spanish aliases `baja` / `media` / `alta`) that tune sampler steps and Gaussian count in one switch.
 - **Runs natively on Apple Silicon (M-series) via the MPS GPU backend** — no CUDA required. The same code auto-selects CUDA, MPS, or CPU.
 - **Arbitrary Gaussian count** (up to 262,144) — trade off visual quality against rendering cost according to your need.
+- **Optional web/AR export**: convert the output to compressed `.sog` / `.spz` / `.glb` for delivery via [splat-transform](https://github.com/playcanvas/splat-transform) (no hard dependency).
 - **Minimal, readable code**: two files (`triposplat.py` and `model.py`), ~2,000 LOC total. Easy to customize and integrate into other ecosystems.
 - **Near-zero dependencies**: no `transformers`, no `diffusers`, no version-conflict hell. Runs on any platform.
 - **Official ComfyUI support**: drop the [official workflow template](https://github.com/Comfy-Org/workflow_templates/blob/main/templates/3d_triposplat_image_to_gaussian_splat.json) into ComfyUI and start playing with TripoSplat right away.
@@ -132,6 +133,33 @@ python run_gradio.py
 
 The demo exposes the **quality preset** dropdown and an **extra-views** uploader
 for multi-view fusion, alongside the existing single-image controls.
+
+
+## Export & compression (web / AR)
+
+The generated `.ply` can be converted to compact, web/AR-friendly formats with
+[splat-transform](https://github.com/playcanvas/splat-transform) (MIT). It runs
+on Node, so it's optional and kept entirely separate from the model pipeline —
+`postprocess_splat.py` shells out to it (or to `npx`) only when you ask:
+
+```bash
+# one-off, no install needed (uses npx under the hood)
+python postprocess_splat.py output.ply output.sog                 # super-compressed for the web
+python postprocess_splat.py output.ply output.glb                 # glTF (KHR_gaussian_splatting) for AR
+python postprocess_splat.py output.ply mobile.ply --decimate 50% --clean
+```
+
+```python
+from postprocess_splat import export_splat, splat_transform_available
+if splat_transform_available():
+    export_splat("output.ply", "output.sog")                      # web
+    export_splat("output.ply", "mobile.ply", decimate="100000")   # lighter for mobile/AR
+```
+
+`run_example.py` calls this automatically at the end **if** splat-transform is
+reachable, emitting `output.sog` / `output.glb` next to the `.ply`. Install Node
+(for `npx`) or `npm install -g @playcanvas/splat-transform` to enable it; without
+it, the rest of the pipeline is unaffected.
 
 ## License
 TripoSplat code and weight models are released under the [MIT License](https://github.com/VAST-AI-Research/TripoSplat/blob/main/LICENSE).

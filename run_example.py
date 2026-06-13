@@ -7,6 +7,7 @@ os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 from pathlib import Path
 
 from triposplat import TripoSplatPipeline
+from postprocess_splat import export_splat, splat_transform_available
 
 
 pipe = TripoSplatPipeline(
@@ -73,4 +74,22 @@ if views:
     gaussian.save_splat("output_multiview.splat")
 else:
     print("Multi-view example skipped — run `python download_example_images.py` first.")
+
+
+# ---------------------------------------------------------------------------
+# Example 5 — optional export/compression for web & AR via splat-transform
+# (https://github.com/playcanvas/splat-transform). Runs only if the tool is
+# reachable (Node's `npx`, or a global install); the pipeline never depends on
+# it. Produces a super-compressed .sog for the web and a glTF .glb for AR.
+# ---------------------------------------------------------------------------
+
+if splat_transform_available():
+    print("Exporting compressed web/AR formats with splat-transform")
+    export_splat("output.ply", "output.sog", quiet=True)                  # web (compact)
+    export_splat("output.ply", "output.glb", quiet=True)                  # AR / engines
+    export_splat("output.ply", "output_mobile.ply", decimate="50%",       # lighter variant
+                 clean_floaters=True, quiet=True)
+else:
+    print("Skipping splat export — install Node.js or "
+          "`npm install -g @playcanvas/splat-transform` to enable it.")
 

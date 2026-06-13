@@ -232,6 +232,10 @@ gradio_outputs/
 output*.ply
 output*.splat
 output_multiview.*
+output*.sog
+output*.glb
+output*.spz
+output*.compressed.ply
 preprocessed_image.webp
 preprocessed_view_*.webp
 *.splat
