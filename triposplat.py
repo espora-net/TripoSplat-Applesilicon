@@ -1,4 +1,5 @@
 import os
+import warnings
 
 # Apple Silicon (MPS) ships no kernel for a couple of ops used here. Enabling the
 # fallback *before* torch is imported lets those ops transparently run on the CPU
@@ -610,12 +611,12 @@ def encode_images(images, dinov3: DinoV3ViT, vae_encoder: Flux2VAEEncoder,
                   generator: torch.Generator = None) -> dict:
     """Encode one or more preprocessed views into a single conditioning dict.
 
-    Multiple views are fused by concatenating their conditioning tokens along the
-    sequence dimension, so the flow model's attention sees every view at once.
-    Supplying several views of one object (e.g. front / side / back product
-    photos) gives the generator more coverage and yields higher-quality, more
-    complete geometry than a single image. A single view reproduces the original
-    single-image behaviour exactly.
+    A single view is the normal path. Multiple views are fused by concatenating
+    their conditioning tokens along the sequence dimension so the flow model
+    attends to every view at once — but note this is **experimental**: TripoSplat
+    is a single-image model with no per-view pose, so token-concat fusion is out
+    of distribution and often degrades quality (see ``TripoSplatPipeline.run``'s
+    ``multiview`` flag, which gates this behind an explicit opt-in).
     """
     views = _as_view_list(images)
     feats = [encode_image(im, dinov3, vae_encoder, generator=generator) for im in views]
@@ -700,17 +701,18 @@ class TripoSplatPipeline:
     @torch.no_grad()
     def run(self, image, seed: int = 42, steps: int = None, guidance_scale: float = None,
             shift: float = None, num_gaussians=None, erode_radius: int = 1,
-            show_progress: bool = False, callback=None, quality=None):
+            show_progress: bool = False, callback=None, quality=None,
+            multiview: bool = False):
         """
         Args:
             image: Input image, or several views of one object. Accepts a file
                 path / PIL.Image / torch.Tensor (`[1,H,W,C]` or `[H,W,C]`, float
                 in `[0, 1]`, optional alpha channel as the 4th channel), **or a
-                list/tuple of those** for multi-view fusion. Passing multiple
-                views (e.g. front / side / back photos) lets the model attend to
-                every view at once for maximum quality and more complete
-                geometry. Attention cost grows with the number of views, so on a
-                36 GB machine prefer 2–3 full-resolution views.
+                list/tuple of those**. TripoSplat is a *single-image* model: it
+                infers the camera of ONE view and reconstructs the object from a
+                learned prior. It has no per-view pose input and was not trained
+                on posed multi-view, so by default only the **first** view is
+                used (any extras are ignored with a warning). See `multiview`.
             seed: RNG seed for the VAE encoder's stochastic latent sampling and
                 the initial flow-matching noise. Same seed → same output.
             quality: Optional quality preset — ``"low"`` / ``"medium"`` /
@@ -744,12 +746,20 @@ class TripoSplatPipeline:
             callback: Optional `fn(step, total)` invoked after each sampler step.
                 Useful for external progress UIs (e.g. ComfyUI's
                 `ProgressBar.update`).
+            multiview: **Experimental.** When `True` and several views are given,
+                their conditioning tokens are concatenated so the flow model
+                attends to all of them at once. This is *out of distribution* for
+                this single-image model (no per-view pose / correspondence), so
+                it frequently degrades quality and can produce incoherent
+                geometry. Leave `False` (default) to use a single clean view; for
+                faithful multi-photo reconstruction use a dedicated, pose-aware
+                pipeline (photogrammetry / optimization-based 3DGS) instead.
 
         Returns:
             `(gaussian, prepared)` for an `int` `num_gaussians`, or
             `(list_of_gaussians, prepared)` for a `list` / `tuple`. `prepared` is
             the RGB composite the encoders actually saw — a single image for a
-            single input, or a list of them for multi-view input.
+            single (or default) input, or a list of them when `multiview=True`.
         """
         preset = resolve_quality(quality)
         steps = int(_first_not_none(steps, preset.get("steps"), 20))
@@ -764,6 +774,27 @@ class TripoSplatPipeline:
 
         gen = torch.Generator(device=self._device).manual_seed(seed)
         prepared = self.preprocess_images(image, erode_radius=erode_radius)
+        # TripoSplat is a single-image model — it has no per-view pose input and
+        # was not trained on posed multi-view, so concatenating several views'
+        # tokens is out of distribution and tends to produce incoherent geometry.
+        # Use the primary view by default; only fuse when explicitly requested.
+        if len(prepared) > 1 and not multiview:
+            warnings.warn(
+                f"{len(prepared)} views supplied but multiview=False; using only "
+                f"the first view. TripoSplat is a single-image model — token-concat "
+                f"multi-view fusion is experimental and usually degrades quality. "
+                f"Pass multiview=True to force fusion, or supply one clean main view.",
+                stacklevel=2,
+            )
+            prepared = prepared[:1]
+        elif len(prepared) > 1 and multiview:
+            warnings.warn(
+                f"Experimental multi-view fusion of {len(prepared)} views: this "
+                f"single-image model was not trained on posed multi-view input, so "
+                f"the result may be incoherent. For faithful multi-photo reconstruction "
+                f"use a pose-aware pipeline (photogrammetry / optimization-based 3DGS).",
+                stacklevel=2,
+            )
         cond = self.encode_images(prepared, generator=gen)
         _release_memory(self._device)  # drop the encoders' pooled activations before the DiT
         try:

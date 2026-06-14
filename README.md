@@ -11,7 +11,7 @@ TripoSplat converts a single 2D image into high-quality and variable number of 3
 
 ## Highlights
 - **High-quality, versatile generation** that handles a wide range of image styles.
-- **Single- or multi-view input**: fuse several photos of the same object (front / side / back) for more complete, higher-quality geometry — or keep using a single image.
+- **Single-image image-to-3D** that handles a wide range of image styles. (Multi-photo *fusion* is gated behind an experimental flag — this model is single-image; see below.)
 - **General quality presets** (`low` / `medium` / `high`, plus Spanish aliases `baja` / `media` / `alta`) that tune sampler steps and Gaussian count in one switch.
 - **Runs natively on Apple Silicon (M-series) via the MPS GPU backend** — no CUDA required. The same code auto-selects CUDA, MPS, or CPU.
 - **Arbitrary Gaussian count** (up to 262,144) — trade off visual quality against rendering cost according to your need.
@@ -109,20 +109,16 @@ tokens and grows the per-step cost too.
 
 
 
-## Multi-view input & quality presets
+## Quality presets & (experimental) multi-view
 
-Pass **several photos of the same object** as a list to fuse them into one model
-— the denoiser attends to every view at once, producing more complete geometry
-than a single image. Combine with a quality preset for a one-switch quality/cost
-trade-off:
+TripoSplat is a **single-image** model: it infers the camera of one view and
+reconstructs the object from a learned prior. Use **one clean main view** (a
+3/4 or side product shot, not a detail close-up) for the best result. Combine
+with a quality preset for a one-switch quality/cost trade-off:
 
 ```python
-# Single image (unchanged behaviour)
+# Single image — the recommended path
 gaussian, prepared = pipe.run("photo.png", quality="high")
-
-# Multi-view fusion for maximum quality (front / side / back / rear …)
-views = ["front.jpg", "side.jpg", "back.jpg"]
-gaussian, prepared = pipe.run(views, quality="high")   # `prepared` is a list here
 ```
 
 Quality presets (`quality=`):
@@ -134,10 +130,31 @@ Quality presets (`quality=`):
 | `high`   | `max`, `best`, `ultra` / `alta`   | 30  | 262,144 |
 
 Any explicit argument (`steps`, `guidance_scale`, `shift`, `num_gaussians`)
-overrides the preset; omitting `quality` keeps the original defaults. Multi-view
-attention cost grows with the number of views — on a 36 GB Mac prefer 2–3
-full-resolution views; reduce the view count, lower the preset, or downscale the
-inputs if you hit an out-of-memory error.
+overrides the preset; omitting `quality` keeps the original defaults.
+
+### Multiple photos? (important)
+
+You can pass a list of views, but **by default only the first is used** — and
+that is deliberate. This model has **no per-view camera/pose input** and was
+never trained on posed multi-view, so concatenating several unposed photos'
+tokens is *out of distribution*: the model can't correlate or triangulate them
+and typically returns incoherent, shapeless geometry. There is an experimental
+opt-in if you want to see for yourself:
+
+```python
+views = ["front.jpg", "side.jpg", "back.jpg"]
+# Default: extras ignored, first view used (emits a warning)
+gaussian, prepared = pipe.run(views, quality="high")
+# Experimental token-concat fusion (usually WORSE, not better):
+gaussian, prepared = pipe.run(views, quality="high", multiview=True)
+```
+
+For **faithful multi-photo reconstruction of a real object**, this generative
+model is the wrong tool — use a pose-aware pipeline instead (photogrammetry /
+Apple Object Capture, or optimization-based 3D Gaussian Splatting with COLMAP
+poses), and capture a proper overlapping orbit/video rather than a handful of
+catalogue stills.
+
 
 ### Example: multi-view sneaker
 
@@ -161,8 +178,9 @@ pip install gradio
 python run_gradio.py
 ```
 
-The demo exposes the **quality preset** dropdown and an **extra-views** uploader
-for multi-view fusion, alongside the existing single-image controls.
+The demo exposes the **quality preset** dropdown, an **extra-views** uploader,
+and an **experimental multi-view fusion** toggle (off by default — this model is
+single-image), alongside the single-image controls.
 
 
 ## Export & compression (web / AR)

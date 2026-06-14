@@ -78,12 +78,15 @@ def _collect_views(image, extra_files):
 
 def generate(image, extra_files, seed: int, quality: str, steps: int,
              guidance_scale: float, num_gaussians: int, output_format: str,
+             multiview_experimental: bool = False,
              progress=gr.Progress(track_tqdm=True)):
     """Run the full pipeline (preprocess + encode + sample + decode).
 
-    Supports single- or multi-view input and quality presets. When `quality` is
-    ``"custom"`` the manual sliders drive the run; otherwise the chosen preset
-    fills in steps + gaussian count.
+    TripoSplat is a single-image model. By default only the main image is used;
+    tick ``multiview_experimental`` to fuse the extra views (out-of-distribution
+    for this model — often degrades quality). When `quality` is ``"custom"`` the
+    manual sliders drive the run; otherwise the chosen preset fills in steps +
+    gaussian count.
     """
     views = _collect_views(image, extra_files)
     if not views:
@@ -100,7 +103,7 @@ def generate(image, extra_files, seed: int, quality: str, steps: int,
     payload = views if len(views) > 1 else views[0]
     try:
         gaussian, prepared = PIPE.run(payload, seed=int(seed), show_progress=True,
-                                      **run_kwargs)
+                                      multiview=bool(multiview_experimental), **run_kwargs)
     except RuntimeError as e:
         raise gr.Error(str(e))
     gen_dt = time.time() - t0
@@ -121,7 +124,12 @@ def generate(image, extra_files, seed: int, quality: str, steps: int,
     else:
         raise gr.Error(f"Unknown output format: {output_format}")
 
-    views_note = f"{len(views)} views  ·  " if len(views) > 1 else ""
+    if len(views) > 1 and multiview_experimental:
+        views_note = f"{len(views)} views fused (experimental)  ·  "
+    elif len(views) > 1:
+        views_note = f"1 of {len(views)} views used (multi-view off)  ·  "
+    else:
+        views_note = ""
     info = (f"{views_note}{gaussian.get_xyz.shape[0]:,} gaussians  ·  "
             f"generation: {gen_dt:.1f}s  ·  saved: {download_path.name}")
     return (prepared_list, _viewer_iframe(ply_path),
@@ -145,8 +153,14 @@ with gr.Blocks(title="TripoSplat") as demo:
             image_in = gr.Image(label="Input image", type="pil", image_mode="RGBA",
                                 height=320)
             extra_files_in = gr.File(
-                label="Extra views (optional, multi-view fusion for max quality)",
+                label="Extra views (single-image model — used only if you tick fusion below)",
                 file_count="multiple", file_types=["image"], type="filepath",
+            )
+            multiview_in = gr.Checkbox(
+                label="⚠️ Experimental: fuse extra views",
+                value=False,
+                info="TripoSplat is single-image; fusing several unposed views is "
+                     "out-of-distribution and usually degrades quality. Prefer one clean main view.",
             )
 
             gr.Examples(
@@ -186,7 +200,7 @@ with gr.Blocks(title="TripoSplat") as demo:
 
     run_btn.click(
         fn=generate,
-        inputs=[image_in, extra_files_in, seed_in, quality_in, steps_in, cfg_in, num_g_in, fmt_in],
+        inputs=[image_in, extra_files_in, seed_in, quality_in, steps_in, cfg_in, num_g_in, fmt_in, multiview_in],
         outputs=[prepared_out, viewer_out, file_out, info_out],
     )
 
