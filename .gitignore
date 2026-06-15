@@ -241,11 +241,14 @@ preprocessed_view_*.webp
 *.splat
 
 # COLMAP experiment: copyrighted source images + heavy/derived outputs.
-# Keep README.md + the run_colmap*.sh / visualize_model.py scripts (committed);
-# ignore the (copyright/heavy/derived) data: stills, extracted video frames,
-# COLMAP workspaces, and rendered point-cloud previews.
+# Keep README.md + the run_colmap*.sh / run_brush_splat.sh / make_masks.py /
+# visualize_model.py scripts (committed); ignore the (copyright/heavy/derived)
+# data: stills, extracted video frames, COLMAP workspaces, point-cloud previews,
+# the prebuilt brush binary, the assembled brush dataset, and exported splats.
 experiments/colmap_sneaker/images/
 experiments/colmap_sneaker/workspace/
 experiments/colmap_sneaker/frames_*/
 experiments/colmap_sneaker/ws_*/
 experiments/colmap_sneaker/renders/
+experiments/colmap_sneaker/tools/
+experiments/colmap_sneaker/gsplat_dataset/

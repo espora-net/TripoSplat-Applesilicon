@@ -5,18 +5,22 @@ Adidas Tokyo sneaker be reconstructed with classic photogrammetry (COLMAP
 Structure-from-Motion), following the official
 [COLMAP tutorial](https://colmap.github.io/tutorial.html)?
 
-It has **two parts** that reach opposite conclusions, and the contrast is the
-whole point:
+It has **three parts**, the first two reaching opposite conclusions about
+photogrammetry, and the third turning the successful reconstruction into an
+actual, viewable Gaussian splat:
 
-| input | script | matcher result | sparse model | verdict |
-|-------|--------|----------------|--------------|---------|
-| **8 retail product stills** | `run_colmap.sh` | **0** verified pairs / 28 | **0 models** | ❌ photogrammetry fails |
-| **96 frames from 2 motion videos** | `run_colmap_video.sh` | **1075** verified pairs / 4560 | **91/96 registered, 1 model** | ✅ sparse SfM works |
+| input | script | result | verdict |
+|-------|--------|--------|---------|
+| **8 retail product stills** | `run_colmap.sh` | **0** verified pairs / 28 → **0 models** | ❌ photogrammetry fails |
+| **96 frames from 2 motion videos** | `run_colmap_video.sh` | **91/96 registered**, 1 sparse model | ✅ sparse SfM works |
+| **those 91 poses + masks** | `run_brush_splat.sh` | **62 k-Gaussian 3DGS `.ply`**, full-frame eval **32.5 dB** | ✅ real splat, native on Metal |
 
 **TL;DR.** Photogrammetry doesn't fail because the *object* is hard — it fails
 when the *capture* has no multi-view overlap (the 8 gallery stills). Give it a
 real motion sequence (video frames) and the very same object reconstructs into a
-single, coherent, sub-pixel-accurate sparse model.
+single, coherent, sub-pixel-accurate sparse model — which **brush** then optimises
+into a genuine, viewable 3D Gaussian Splat **natively on Apple Silicon (Metal)**,
+no CUDA.
 
 ## Why this experiment exists
 
@@ -182,19 +186,132 @@ It is **not** itself a finished Gaussian-splat asset, and dense MVS
 
 ---
 
-## Files
+# Part C — an actual Gaussian splat, native on Apple Silicon (`run_brush_splat.sh`)  ✅
+
+Part B produced **camera poses + a sparse point cloud**. That is the *front-end*
+of optimisation-based **3D Gaussian Splatting** — not yet a splat. Part C runs the
+optimiser to turn those poses into a **real, viewable 3DGS `.ply`**, at the highest
+quality this machine can produce.
+
+### Why `brush` (and not gsplat / nerfstudio)
+
+The reference 3DGS optimisers (Inria, **gsplat**, **nerfstudio**) ship **CUDA-only**
+rasterisers → they **do not run on Apple Silicon**. The Metal-native option is
+[**brush**](https://github.com/ArthurBrussee/brush): a from-scratch 3DGS
+trainer **and** viewer built on `wgpu`/`Burn` that runs on **Metal**, ingests a
+COLMAP model directly, and exports a standard 3DGS `.ply` (SH degree 3). We use
+the prebuilt `aarch64-apple-darwin` binary (release v0.3.0). So this is the
+**best practical Apple-Silicon-local** 3DGS path, *not* a CUDA gsplat/nerfstudio
+run.
+
+```bash
+bash run_brush_splat.sh            # masks -> black-bg dataset -> 30k-step train
+# view it (native Metal viewer):
+tools/brush/.../brush_app tools/brush/out/black/sneaker_black_30000.ply --with-viewer
+```
+
+### Pipeline & the choices that matter
+
+1. **Foreground masks (`make_masks.py`, BiRefNet).** The repo's background-removal
+   model produces a sneaker silhouette **at the original frame resolution** (using
+   `remove_background`, **not** `preprocess_image` — the latter crops/recenters,
+   which would break alignment with the COLMAP poses). 96 masks, mean foreground
+   coverage 24 %.
+2. **Clean cut-out via BLACK-background compositing (`make_black_dataset.py`).**
+   This is the single most important quality choice, and it was driven by a
+   measured failure (below). Each frame is composited onto **black** (`rgb*alpha`)
+   and brush trains with its **normal full-image photometric loss**. That forces
+   the renderer to reproduce a black background everywhere, so background
+   "floater" Gaussians are **actively penalised**.
+3. **brush on Metal**, max-quality knobs: `--sh-degree 3` (brush max),
+   `--max-resolution 1920` (frames are 720×1280 → **full native resolution**),
+   `--total-steps 30000` (densification → 15 k, the standard 3DGS schedule),
+   `--eval-split-every 8` (**hold out 12 of 91 views**, stratified across both
+   clips), `--seed 42`. 79 train / 12 eval. Runtime **≈ 20 min** on an M3 Pro;
+   peak RSS < 1 GB; final model **62 246 Gaussians**, 14.7 MB.
+
+### The floater finding (why "just mask the background" is not enough)
+
+brush also supports a `masks/` folder (`AlphaMode::Masked`), which **ignores** the
+background in the loss. We tried it first — and it produces a great-looking shoe
+but **bad floaters**: because the busy, animated, light-streak backgrounds of the
+(AI-generated) source frames are merely *ignored*, nothing stops Gaussians from
+drifting into them. They look fine from the captured views but are garbage from
+novel angles. Compositing onto **black + full-image loss** fixes this by
+*penalising* any non-black background. We measured both on the **same 12 held-out
+views** (`eval_fg_psnr.py`):
+
+| approach | foreground PSNR ↑ | brush full-frame PSNR ↑ | out-of-mask leakage ↓ (floaters) |
+|----------|------------------:|------------------------:|---------------------------------:|
+| `masks/` folder (`Masked`) | **28.5 dB** | 5.4 dB¹ | **62 %** of bg pixels lit, mean lum 80/255 |
+| **black-bg + full loss** *(shipped)* | 26.6 dB² | **32.5 dB** | **0.18 %** of bg pixels lit, mean lum 0.1/255 |
+
+¹ The masked run's full-frame PSNR is *meaningless*: it renders a **black**
+background while brush's built-in PSNR compares against the **original** frames,
+whose backgrounds are bright animated light streaks. (This is why we report
+foreground PSNR + leakage instead of trusting brush's headline number.)
+² Slightly lower **only because** it is scored against those same original frames,
+whose shoe edges carry a bloom halo the clean model deliberately doesn't
+reproduce; against its own (black-bg) eval target brush reports **32.5 dB**. The
+**floater leakage drops ~340×** — a clean, viewable asset.
+
+### Honest framing (what this is, and is not)
+
+> A **genuine, viewable, optimised 3D Gaussian Splat** (`.ply`, SH degree 3, 62 k
+> Gaussians) **trained locally on Apple Silicon with brush/Metal** — not a CUDA
+> gsplat/nerfstudio run — from the COLMAP poses recovered in Part B. It is best
+> validated for the **captured side/zoom views**; the **far side, top and sole are
+> incomplete or inferred** because the input coverage is side-biased
+> (bbox ≈ [0.89, 0.14, 1.0]). Quality is reported as **foreground-mask PSNR on
+> held-out source views** (≈ 27 dB) plus an **out-of-mask leakage** floater check —
+> **not** full-frame PSNR, **not** metric-scan accuracy, and **not** validated
+> against arbitrary real-world viewpoints. The foreground-mask metric only scores
+> appearance *inside* the estimated silhouette; the leakage row is what guards
+> against floaters/background spill *outside* it.
+>
+> The source videos are **AI-generated**: COLMAP registering 91/96 frames shows
+> the generated frames are self-consistent enough for pose recovery, **not** that
+> the physical sneaker was metrically captured.
+
+Caveats and methodology validated by a GPT-5.5 rubber-duck review
+(verdict: *sound, with caveats* — all of which are reflected above: the
+practical-vs-absolute "max quality" wording, the narrowness of foreground PSNR,
+the floater/leakage check, and the AI-source disclosure).
+
+---
 
 ```
 experiments/colmap_sneaker/
-├── README.md             # this file                                  (committed)
-├── run_colmap.sh         # Part A — 8 stills pipeline                  (committed)
-├── run_colmap_video.sh   # Part B — video-frames pipeline              (committed)
-├── visualize_model.py    # render a sparse model (cameras + points)    (committed)
-├── images/               # the 8 stills          (gitignored — © adidas / ECI)
-├── frames_*/             # extracted video frames (gitignored — derived/©)
-├── ws_*/                 # COLMAP workspaces: db, sparse/, logs         (gitignored)
-└── renders/              # point-cloud preview PNGs                     (gitignored)
+├── README.md              # this file                                  (committed)
+├── run_colmap.sh          # Part A — 8 stills pipeline                  (committed)
+├── run_colmap_video.sh    # Part B — video-frames pipeline              (committed)
+├── visualize_model.py     # render a sparse model (cameras + points)    (committed)
+├── run_brush_splat.sh     # Part C — COLMAP -> brush 3DGS pipeline       (committed)
+├── make_masks.py          # Part C — BiRefNet foreground masks           (committed)
+├── make_black_dataset.py  # Part C — composite frames onto black         (committed)
+├── eval_fg_psnr.py        # Part C — foreground PSNR + floater leakage    (committed)
+├── images/                # the 8 stills          (gitignored — © adidas / ECI)
+├── frames_*/              # extracted video frames (gitignored — derived/©)
+├── ws_*/                  # COLMAP workspaces: db, sparse/, logs         (gitignored)
+├── renders/               # point-cloud preview PNGs                     (gitignored)
+├── gsplat_dataset/        # masked brush dataset: images/masks/sparse    (gitignored)
+└── tools/                 # brush binary, black-bg dataset, splats, evals (gitignored)
 ```
+
+The trained splat itself (`tools/brush/out/black/sneaker_black_30000.ply`,
+62 k Gaussians, 14.7 MB) is **gitignored** (heavy/derived); regenerate it with
+`bash run_brush_splat.sh`.
+
+## Apple Silicon notes — the brush 3DGS step (Part C)
+
+- Prebuilt binary: `gh release download v0.3.0 -R ArthurBrussee/brush -p
+  'brush-app-aarch64-apple-darwin.tar.xz'`; then `chmod +x brush_app` and
+  `xattr -dr com.apple.quarantine` to clear Gatekeeper. `run_brush_splat.sh`
+  downloads + de-quarantines it automatically if missing.
+- Runs on **Metal** via `wgpu` (logs `AdapterInfo { name: "Apple M3 Pro", …
+  backend: Metal }`). It is both the trainer and a live viewer (`--with-viewer`).
+- `make_masks.py` runs BiRefNet on **MPS** (the `deform_conv2d` op falls back to
+  CPU, ≈ 8 s/frame, ≈ 12 min for 96 frames — see the main repo's MPS notes).
 
 ## Apple Silicon notes (COLMAP 4.0.4, Homebrew, no CUDA)
 
