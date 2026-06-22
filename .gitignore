@@ -252,3 +252,24 @@ experiments/colmap_sneaker/ws_*/
 experiments/colmap_sneaker/renders/
 experiments/colmap_sneaker/tools/
 experiments/colmap_sneaker/gsplat_dataset/
+experiments/colmap_sneaker/openmvs/
+
+# OpenMVS pipeline: keep get_openmvs.sh / run_openmvs.sh / view_mesh.sh /
+# build_openmvs.sh + README.md (committed); ignore the prebuilt binaries and all
+# heavy/derived outputs (dense clouds, depth maps, meshes, textures, .glb, the
+# served viewer assets).
+experiments/openmvs/prebuilt/
+experiments/openmvs/**/openmvs/
+
+# TripoPoor capture: copyrighted source photos + heavy COLMAP/OpenMVS outputs.
+# Keep run_colmap*.sh (committed); ignore everything heavy/derived.
+experiments/TripoPoor/*.jpg
+experiments/TripoPoor/*.JPG
+experiments/TripoPoor/images/
+experiments/TripoPoor/colmap/
+experiments/TripoPoor/colmap_hq/
+experiments/TripoPoor/openmvs/
+
+# macOS Finder droppings + transient detached-run stdout captures.
+.DS_Store
+experiments/**/*.out
