@@ -332,9 +332,11 @@ RefineMesh L0 `--scales 3` + TextureMesh, exact masks staged).
 # 1) render the two synthetic sets from the (local, gitignored) decoded GLB:
 #    node decode: @gltf-transform/core + draco3dgltf  ->  eci_tokyo_plain.glb
 python3 render_synthetic.py eci_tokyo_plain.glb synthetic_ref/full full 1280
+python3 render_synthetic.py eci_tokyo_plain.glb synthetic_ref/full2 full2 1280   # + into-collar rings
 python3 render_synthetic.py eci_tokyo_plain.glb synthetic_ref/side side 1280
 # 2) SfM + dense MVS for each:
 bash run_colmap_synth.sh full   &&  SYNTH_SET=full QUALITY=max COLOR_NORM=0 bash ../openmvs/run_openmvs.sh synth
+bash run_colmap_synth.sh full2  &&  SYNTH_SET=full2 QUALITY=max COLOR_NORM=0 bash ../openmvs/run_openmvs.sh synth
 bash run_colmap_synth.sh side   &&  SYNTH_SET=side QUALITY=max COLOR_NORM=0 bash ../openmvs/run_openmvs.sh synth
 # 3) inspect (turntable + clay):
 python3 render_obj_turntable.py synthetic_ref/full/openmvs/scene_textured.obj  /tmp/full.png
@@ -365,6 +367,28 @@ python3 render_geo_turntable.py synthetic_ref/full/openmvs/scene_dense_mesh_refi
   **dense-MVS / surface-reconstruction interpolation over weak photometric
   evidence** on the textureless concave opening.
 
+### Closing the dome — the `full2` into-collar rings ✅ (tested, not just predicted)
+
+The dome hypothesis (too few views see *into* the cavity → the mesher spans it)
+makes a falsifiable prediction: **add views that look down into the opening and
+the collar should reconstruct**. The foot-opening is walled by the **textured**
+magenta lining + tan footbed, so extra oblique-from-above observations give dense
+MVS real photo-consistency to anchor the concavity. The **`full2`** set adds two
+such rings (el = 60° ×12 az, el = 72° ×6 az → 108 views total) and is otherwise
+identical.
+
+- **COLMAP:** `full2` = **97/108** registered, mean reproj **0.49 px** (the new
+  collar views register cleanly).
+- **Result (clay + textured, same `QUALITY=max`):** the smooth domed upper is
+  **gone**. `full2` recovers the **laced throat as an actual open collar** — the
+  magenta interior lining and tan footbed are visible **inside** the shoe — with
+  **individual laces/eyelets in 3-D relief** and crisp stripes, where `full` was a
+  featureless blob over the same region. This **confirms** the dome was a
+  coverage/evidence artefact (improvable), **not** an inherent MVS limit.
+- Side-by-side (clay top-down `full` vs `full2`) and the `full2` textured hero are
+  in the session benchmark renders. `full2` is now the **recommended max-coverage
+  preset**; `full` is kept as the ablation baseline that exposes the dome.
+
 ### What this does and does **not** claim
 
 - ✅ In this synthetic ablation, **broader pose coverage / view diversity is the
@@ -382,11 +406,11 @@ python3 render_geo_turntable.py synthetic_ref/full/openmvs/scene_dense_mesh_refi
 - ⚠️ The uniform-green result also benefits from **uniform synthetic lighting**;
   this does not prove coverage *alone* fixed the original multi-tone green (the
   AI-video frames also carried lighting/generation artifacts).
-- ⚠️ The domed collar is a **characteristic MVS failure mode on low-texture,
-  concave/open geometry** — *likely* improvable (more inward/collar views,
-  different meshing/regularisation, manual cleanup), **not proven inherent**. The
-  retail asset avoids it because it is **artist-modelled / artist-cleaned**, not
-  photogrammetric.
+- ✅ The domed collar — a characteristic MVS failure mode on low-texture,
+  concave/open geometry — was **confirmed improvable**: the `full2` into-collar
+  rings recover the open laced throat (see "Closing the dome"), so it was a
+  **coverage/evidence artefact, not an inherent limit**. (The retail asset also
+  avoids it, but by being **artist-modelled / artist-cleaned**, not photogrammetric.)
 - ⚠️ The comparison is **visual**, not metric (no mesh-to-mesh distance / matched-
   view image diff), and “max quality” here means the practical pipeline maximum,
   not an absolute optimum.

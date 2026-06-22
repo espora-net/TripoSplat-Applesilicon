@@ -23,7 +23,8 @@
 # Usage:
 #   bash run_openmvs.sh sneaker      # the 91-view Adidas Tokyo COLMAP model
 #   bash run_openmvs.sh tripopoor    # the TripoPoor capture (largest HQ model)
-#   SYNTH_SET=full QUALITY=max COLOR_NORM=0 bash run_openmvs.sh synth  # coverage-ablation
+#   SYNTH_SET=full  QUALITY=max COLOR_NORM=0 bash run_openmvs.sh synth  # coverage-ablation
+#   SYNTH_SET=full2 QUALITY=max COLOR_NORM=0 bash run_openmvs.sh synth  # +collar rings (best)
 #                                    # synthetic views of the retail GLB (full|side); see
 #                                    # ../colmap_sneaker run_colmap_synth.sh + README "Part D"
 #   OPENMVS_BIN=/path bash run_openmvs.sh <preset>
@@ -82,7 +83,9 @@ case "$PRESET" in
   synth)
     # Coverage-ablation: synthetic views rendered from the reference El Corte
     # Ingles / Vyking GLB (render_synthetic.py) + COLMAP (run_colmap_synth.sh).
-    # SYNTH_SET=full (default, ~90 views, 360 coverage) or side (limited arc).
+    # SYNTH_SET=full (default, ~90 views, 360 coverage), full2 (~108 views,
+    # full + into-the-collar rings -> open laced throat, best surface) or
+    # side (limited arc, ablation control).
     # Proves the pipeline reaches retail quality GIVEN full coverage; the masks
     # are exact (z-buffer silhouettes), and lighting is already uniform so
     # COLOR_NORM is unnecessary here (default off via SET below).

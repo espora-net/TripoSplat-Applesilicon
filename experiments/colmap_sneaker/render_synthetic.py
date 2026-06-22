@@ -1,7 +1,16 @@
 #!/usr/bin/env python3
 """Synthetic capture rig: render flat-lit, plain-bg RGB + alpha masks from a GLB.
 
-Usage: render_synthetic.py <plain.glb> <outdir> <mode:full|side> [size=1280]
+Usage: render_synthetic.py <plain.glb> <outdir> <mode:full|full2|side> [size=1280]
+
+Modes:
+  full   ~90 views  : 3 elevation rings x 24 az + high/low rings + top + sole.
+  full2  ~108 views : full + two dense "looking-into-the-collar" rings
+                      (el 60 x12, el 72 x6). These give dense MVS photo-consistent
+                      evidence of the concave foot-opening so the textureless upper
+                      is NOT bridged into a smooth dome (recovers the laced throat
+                      and open collar). Use this for the best surface quality.
+  side   ~27 views  : limited frontal-left arc (mimics the original video bias).
 
 Emits:
   <outdir>/images/view_####.jpg     (object on neutral gray, flat lighting)
@@ -55,7 +64,7 @@ dist = R / math.sin(math.radians(fov/2)) * 0.72  # frame with margin (no edge cl
 
 def view_list(mode):
     vs = []
-    if mode == "full":
+    if mode in ("full", "full2"):
         for el in (-25, 0, 25):
             for az in range(0, 360, 15):   # 24 each -> 72
                 vs.append((az, el))
@@ -63,6 +72,15 @@ def view_list(mode):
             for az in range(0, 360, 45):   # 8 each -> 16
                 vs.append((az, el))
         vs.append((0, 82)); vs.append((0, -82))   # top + sole
+        if mode == "full2":
+            # Dense "looking-into-the-collar" rings: the foot opening is a concave
+            # cavity walled by the (textured) magenta lining + tan footbed. Extra
+            # oblique-from-above views give dense MVS photo-consistent evidence of
+            # the concavity so the mesher does not bridge it into a smooth dome.
+            for az in range(0, 360, 30):   # 12
+                vs.append((az, 60))
+            for az in range(0, 360, 60):   # 6
+                vs.append((az, 72))
     else:  # side-biased control: limited frontal-left arc, few elevations
         for el in (0, 15, 30):
             for az in list(range(300, 360, 15)) + list(range(0, 75, 15)):  # ~9 az

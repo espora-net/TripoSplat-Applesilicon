@@ -253,8 +253,10 @@ Levers if RAM/time blow up: raise `--resolution-level` (use `QUALITY=low`), lowe
   demonstrated** by a controlled synthetic coverage ablation (same pipeline, full
   360° vs side-biased views rendered from a retail reference) — see
   `../colmap_sneaker/README.md` **"Part D"**: full coverage closes the hollow far
-  side/heel; the one residual is the textureless concave collar (a dense-MVS
-  interpolation limit, not coverage).
+  side/heel; and the one residual — the textureless concave collar domed over by
+  dense MVS — is itself **closed by the `full2` preset** (adds into-the-collar
+  view rings, `SYNTH_SET=full2`), which recovers the **open laced throat**. So the
+  collar dome was a coverage/evidence artefact too, **not** an inherent limit.
 - **TripoPoor (hard input):** a real handheld orbit of a **white, reflective
   leather sneaker in dim light against a plain background**. The first COLMAP
   pass registered only 13/44 images into two fragmented sub-models; a

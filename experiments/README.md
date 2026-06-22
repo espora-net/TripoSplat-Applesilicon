@@ -173,13 +173,25 @@ y **lo pasamos por nuestro propio proceso** en dos versiones:
 decide la calidad**. Dar toda la vuelta elimina los huecos del talón y la parte
 trasera. Es justo lo que explica la sección A de arriba, ahora comprobado.
 
-**Lo único que el proceso todavía no resuelve solo:** la **boca de la zapatilla**
-(por donde entra el pie). Como el empeine verde es una superficie lisa **sin
-apenas detalle**, el programa no tiene "pistas" para calcular su forma exacta y
-**la cierra con una cúpula lisa** en lugar de dejar el hueco abierto. Un modelo
-profesional no tiene este problema porque **lo ha modelado un artista a mano**,
-no a partir de fotos. Se puede mejorar (más fotos asomándose al interior, o un
-retoque manual de la malla), pero es la parte más difícil de la fotogrametría.
+**El único fallo que quedaba — y cómo lo hemos cerrado:** la **boca de la
+zapatilla** (por donde entra el pie) salía tapada por una **cúpula lisa** en lugar
+de quedar abierta. La causa: con la cobertura "completa" casi ninguna foto se
+**asomaba al interior**, así que el programa no tenía pistas de que ahí hay un
+hueco y lo rellenaba. **La solución fue añadir fotos mirando hacia dentro de la
+boca** (dos anillos de cámaras desde arriba; el preset **`full2`**, 108 fotos en
+total). El forro magenta y la plantilla del interior **sí tienen detalle**, así
+que con esas vistas el programa ya reconstruye bien el hueco:
+
+- Ahora la **boca queda abierta**, con los **cordones y ojales en relieve real** y
+  se ve el **forro magenta por dentro** de la zapatilla — justo como en el modelo
+  profesional. La cúpula lisa **desaparece**.
+- Es decir, aquel defecto **tampoco era un límite del proceso**: era, otra vez,
+  cuestión de **cobertura de fotos** (faltaban vistas asomándose al interior).
+
+Con esto el resultado **alcanza el carácter del modelo profesional de referencia**
+(forma completa, textura nítida y boca abierta con cordones). La diferencia que
+aún queda es de acabado fino y propia de comparar una captura idealizada con un
+modelo hecho a mano por un artista; es una comparación **visual**, no métrica.
 
 > **Nota.** Este modelo profesional y todas las imágenes derivadas son material
 > con derechos de autor: se usaron **solo en local como referencia privada**, no
