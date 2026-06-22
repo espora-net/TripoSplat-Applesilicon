@@ -47,6 +47,18 @@ bash openmvs/run_openmvs.sh tripopoor    # el otro ejemplo (49 fotos reales)
 
 Tarda entre un par de minutos (zapatilla) y unos minutos más (fotos grandes).
 
+**Elige la calidad** con `QUALITY` (por defecto `medium`, el equilibrio recomendado):
+
+```bash
+QUALITY=high   bash openmvs/run_openmvs.sh sneaker   # máximo detalle (4× triángulos, más lento)
+QUALITY=medium bash openmvs/run_openmvs.sh sneaker   # equilibrio: superficie suave y limpia ⭐
+QUALITY=low    bash openmvs/run_openmvs.sh sneaker   # vista rápida (más basto)
+```
+
+> En la zapatilla, `medium` da la **superficie más suave y la silueta más limpia**;
+> `high` añade muchísimo más detalle fino, pero a resolución completa la superficie
+> sale algo más "arrugada" (ver la sección sobre la suavidad, más abajo).
+
 ### 3) Verlo y moverlo en el navegador
 
 ```bash
@@ -61,15 +73,25 @@ para acercar/alejar, **click derecho + arrastrar** para desplazar.
 ## ¿Por qué la zapatilla se reconoce, pero la superficie no es lisa?
 
 Ya se identifica perfectamente la zapatilla (cuero verde, franjas magenta, el
-trébol, los cordones). El programa **ahora aplica automáticamente un paso de
-"refinado"** que ha limpiado bastante el resultado: ha quitado los trozos blancos
-del fondo que antes sobresalían y ha dejado la silueta más ajustada. Aun así, la
-superficie **no queda perfectamente lisa**.
+trébol, los cordones). El programa **ahora aplica automáticamente varios pasos de
+limpieza** que han mejorado mucho el resultado:
+
+- **Refinado** de la malla contra las fotos (recupera detalle).
+- **Recorte del fondo con máscaras**: quita de raíz los trozos blancos del fondo
+  que antes sobresalían (la silueta queda mucho más ajustada).
+- **Suavizado y eliminación de picos**, más un pequeño *recorte de la silueta* para
+  que no queden "solapas" finas en el contorno.
+
+Con esto la **cara exterior** de la zapatilla (la del logo y las franjas) sale
+**suave y limpia**. Aun así, hay zonas que **no quedan perfectamente lisas**: sobre
+todo el **interior** de la zapatilla y el **lado opuesto**, porque las fotos del
+ejemplo giran casi siempre por el mismo lado.
 
 Esto **no es un fallo del programa**: la calidad del modelo 3D depende casi por
-completo de **las fotos de entrada**. Con pocas fotos, reflejos, o fondo incluido,
-la "escultura" sale con bultos y huecos. La buena noticia es que se puede mejorar
-mucho, y casi todo está en cómo se capturan las fotos.
+completo de **las fotos de entrada**. Donde **no** hubo fotos (interior, parte de
+atrás, suela), el programa tiene que "inventar" y salen bultos o huecos. La buena
+noticia es que se puede mejorar mucho, y casi todo está en cómo se capturan las
+fotos.
 
 ---
 
@@ -96,23 +118,30 @@ Ordenado de lo que **más** ayuda a lo que menos:
 
 ### B. Ajustes del proceso
 
-Algunos **ya se aplican solos** en el pipeline (`run_openmvs.sh`):
+Casi todos **ya se aplican solos** en el pipeline (`run_openmvs.sh`):
 
-- ✅ **Refinado** (RefineMesh) → afina la superficie contra las fotos y elimina los
-  trozos de fondo sueltos. **Activado por defecto** (desactívalo con `REFINE=0`).
+- ✅ **Refinado** (RefineMesh) → afina la superficie contra las fotos. Activado por
+  defecto (desactívalo con `REFINE=0`).
+- ✅ **Recorte del fondo con máscaras** → en la zapatilla ya está activado: el
+  programa sabe qué es zapatilla y qué es fondo, y **no reconstruye el fondo**. Es
+  la mayor mejora de limpieza, y ahora es automática.
+- ✅ **Suavizado + eliminación de picos + recorte de la silueta** → para que la
+  superficie quede lisa y sin "solapas" en el borde. Se ajusta solo según la calidad.
 - ✅ **Textura a máxima resolución** → la foto se pega desde la imagen completa, no
-  desde una versión reducida. Ya activado.
+  desde una versión reducida.
 
-Y otros se pueden **activar a mano** cuando quieras más calidad:
+Y puedes **subir o bajar la intensidad** cuando quieras:
 
-- 🔲 **Recortar el fondo ("máscaras")** → la mayor mejora de limpieza pendiente:
-  le decimos al programa qué es zapatilla y qué es fondo, para que **no reconstruya
-  nada del fondo**. Requiere rehacer la parte densa.
-- 🔲 **Limpieza más fuerte de la malla** → cierra más agujeros y elimina más picos.
+```bash
+QUALITY=high  bash openmvs/run_openmvs.sh sneaker   # más detalle
+SMOOTH=6      bash openmvs/run_openmvs.sh sneaker   # superficie aún más suave
+MASK_ERODE=6  bash openmvs/run_openmvs.sh sneaker   # recortar más el contorno
+MASKS=none    bash openmvs/run_openmvs.sh sneaker   # no recortar el fondo
+```
 
-👉 Los comandos exactos para aplicar todo esto **sobre el modelo que ya tenemos**
-(sin volver a capturar) están más abajo, en
-**[Pasos concretos para mejorar el modelo](#-pasos-concretos-para-mejorar-el-modelo-que-ya-tenemos-avanzado)**.
+> La regla práctica: **`medium` = la superficie más suave y limpia** (recomendado
+> para un render de producto); **`high` = el máximo detalle fino**, a costa de una
+> superficie un poco más rugosa porque trabaja a resolución completa.
 
 ---
 
@@ -125,12 +154,15 @@ Y otros se pueden **activar a mano** cuando quieras más calidad:
 
 Lo que el pipeline **ya hace por ti** (no tienes que ejecutarlo a mano):
 
-1. **Refinar la malla** (RefineMesh) — recupera detalle y limpia el fondo. En la
-   zapatilla pasó de 210k a ~73k caras quitando los picos del fondo.
-2. **Texturizar desde la foto a máxima resolución** (usando `scene.mvs`).
+1. **Refinar la malla** (RefineMesh) — recupera detalle y limpia el fondo.
+2. **Recortar el fondo con máscaras** (en la zapatilla) — elimina de raíz los restos
+   de fondo antes de reconstruir.
+3. **Suavizar + quitar picos + recortar la silueta** — para una superficie lisa.
+4. **Texturizar desde la foto a máxima resolución** (usando `scene.mvs`).
 
-Si quieres ir más allá, estos son los comandos exactos. Primero define la ruta a
-los programas y entra en la carpeta del ejemplo:
+Los comandos de abajo son la **referencia** de lo que ocurre por dentro (y cómo
+ajustarlo aún más a mano). Primero define la ruta a los programas y entra en la
+carpeta del ejemplo:
 
 ```bash
 cd experiments
@@ -161,40 +193,46 @@ texturizar:
   --empty-color 8421504 --export-type obj
 ```
 
-### 2) Recortar el fondo con máscaras — la mayor mejora pendiente ⭐
+### 2) Recortar el fondo con máscaras — ya integrado ✅
 
-Los restos de fondo se eliminan de raíz si le damos una **silueta (máscara)** por
-cada foto. Cada máscara va **junto a su imagen** (en
-`openmvs/undistorted/images/`), con el nombre de la imagen **+ `.mask.png`**
-(blanco = objeto, negro = fondo):
+> **En la zapatilla esto ya se hace solo.** El pipeline coge las máscaras del objeto
+> (las que generamos en la *Parte C* con BiRefNet), las ajusta al tamaño de cada
+> imagen, **recorta un poco la silueta** (`MASK_ERODE`) para que no queden solapas, y
+> densifica **ignorando el fondo**. Aquí queda como referencia de cómo funciona.
+
+Cada máscara va **junto a su imagen** (en `openmvs/undistorted/images/`), con el
+nombre de la imagen **+ `.mask.png`** (blanco = objeto, negro = fondo):
 
 ```
 undistorted/images/00001.jpg
 undistorted/images/00001.jpg.mask.png
 ```
 
-Después se vuelve a densificar **ignorando el fondo**, y se rehacen malla → refinado
-→ textura a partir de `scene_dense_masked.mvs`:
+Después se densifica **ignorando el fondo** (lo que hace el pipeline por ti):
 
 ```bash
-"$BIN/DensifyPointCloud" scene.mvs -w . -o scene_dense_masked.mvs \
+"$BIN/DensifyPointCloud" scene.mvs -w . -o scene_dense.mvs \
   --resolution-level 1 --max-resolution 1600 \
   --number-views 5 --number-views-fuse 3 --ignore-mask-label 0
 # (TripoPoor: --max-resolution 2400)
 ```
 
-> Ya generamos máscaras del objeto en la *Parte C* (BiRefNet); se pueden reutilizar.
+> Para reutilizarlo en tus propias fotos: pasa la carpeta de máscaras con
+> `MASKS=/ruta/a/masks bash openmvs/run_openmvs.sh <preset>`.
 
 ### 3) Aún más detalle (solo si hace falta y hay tiempo)
 
-Densificar a resolución completa con `--resolution-level 0` en `DensifyPointCloud`
-(≈4× píxeles, ≈4–8× CPU/RAM). Recomendado **solo después** de aplicar máscaras,
-para no amplificar el ruido del fondo.
+Densificar a resolución completa con `QUALITY=high` (≈4× píxeles, ≈4–8× CPU/RAM).
+Ya combina el recorte del fondo y un suavizado más fuerte. Da muchísimo más detalle
+fino, pero la superficie sale algo más rugosa que en `medium`.
 
 ### ¿Por dónde empezar?
 
-El **refinado + textura nítida ya están aplicados**. El siguiente salto real de
-calidad es **(2) las máscaras**, que quitan por completo los restos de fondo.
+El **refinado, las máscaras y el suavizado ya están aplicados** en la zapatilla. Si
+quieres una superficie aún más lisa, sube `SMOOTH`; si quieres más detalle, usa
+`QUALITY=high`. El **mayor salto de calidad** real ya no está en los ajustes, sino
+en **hacer más fotos y mejor iluminadas**, cubriendo también el interior y el lado
+que ahora no se ve.
 
 ---
 
@@ -215,13 +253,16 @@ calidad es **(2) las máscaras**, que quitan por completo los restos de fondo.
 
 ```bash
 cd experiments
-bash openmvs/get_openmvs.sh          # 1) instalar (una vez)
-bash openmvs/run_openmvs.sh sneaker  # 2) generar el modelo 3D
-bash openmvs/view_mesh.sh sneaker    # 3) verlo y girarlo
+bash openmvs/get_openmvs.sh                 # 1) instalar (una vez)
+bash openmvs/run_openmvs.sh sneaker         # 2) generar el modelo 3D (calidad media)
+QUALITY=high bash openmvs/run_openmvs.sh sneaker   # …o con el máximo detalle
+bash openmvs/view_mesh.sh sneaker           # 3) verlo y girarlo
 ```
 
-¿Quieres más nitidez y una superficie más suave? Haz **más fotos, bien iluminadas
-y solapadas**, y pídenos activar el **recorte de fondo** y el **refinado**.
+¿Quieres más nitidez y una superficie aún más suave? El **recorte de fondo, el
+refinado y el suavizado ya van activados**. El siguiente salto está en la captura:
+haz **más fotos, bien iluminadas y solapadas**, cubriendo también el interior y el
+lado opuesto.
 
 > Detalle técnico completo (etapas, parámetros, tiempos medidos, soluciones a
 > problemas): [`openmvs/README.md`](openmvs/README.md).

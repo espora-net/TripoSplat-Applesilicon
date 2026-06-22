@@ -12,9 +12,10 @@ needs CUDA and is unavailable on the Mac, so we hand COLMAP's sparse poses to
 **OpenMVS**, whose multi-view stereo runs on CPU/OpenMP.
 
 > **Status: WORKING end-to-end on this M3 Pro.** The sneaker dataset produces a
-> full textured mesh (233k dense points → rough 210k-face mesh → **RefineMesh →
-> 73k-face clean mesh**, 8.6 MB `.obj` + 0.8 MB texture) in **~2 min total**,
-> viewable interactively in the browser. See "Results" below.
+> full textured mesh — **masked + refined + smoothed** — in **~2 min** at
+> `QUALITY=medium` (~75k clean faces, 8.3 MB `.obj`) or **~5.5 min** at
+> `QUALITY=high` (full-res, ~279k faces for maximum micro-detail), viewable
+> interactively in the browser. See "Quality presets" and "Results" below.
 
 ---
 
@@ -29,12 +30,35 @@ bash get_openmvs.sh
 # 2) Build the textured mesh from a COLMAP model.
 bash run_openmvs.sh sneaker        # the 91-view Adidas Tokyo model
 #   bash run_openmvs.sh tripopoor  # the TripoPoor capture (once its COLMAP is ready)
+#   QUALITY=high  bash run_openmvs.sh sneaker   # full-res, 4× faces, more micro-detail
+#   QUALITY=low   bash run_openmvs.sh sneaker   # quarter-res, fast preview
 
 # 3) Move the model around in an interactive 3D viewer (browser).
 bash view_mesh.sh sneaker          # drag = rotate · scroll = zoom · right-drag = pan
 ```
 
 That's the whole flow. Steps 2–3 are repeatable; step 1 is one-time.
+
+### Quality presets (`QUALITY=high|medium|low`, default `medium`)
+
+Two independent axes drive the result, and they **trade off**:
+
+| `QUALITY` | densify `--resolution-level` | refine `--max-face-area` | smooth / remove-spurious / regularity / mask-erode | sneaker faces |
+|---|---|---|---|---|
+| `high`   | 0 (full res) | 8  | 4 / 40 / 0.35 / 4 | ~279k |
+| `medium` | 1 (half res) | 16 | 3 / 30 / 0.25 / 3 | ~75k  |
+| `low`    | 2 (¼ res)    | 32 | 2 / 20 / 0.20 / 2 | ~30k  |
+
+- **DETAIL** scales with `--resolution-level` (full res ⇒ ~4× the points ⇒ many more
+  triangles and sharper micro-relief).
+- **SMOOTHNESS/CLEANLINESS** comes from `ReconstructMesh --smooth/--remove-spurious`,
+  `RefineMesh --regularity-weight`, and eroding the foreground mask to shave
+  silhouette slivers ("flaps").
+- Full-res depth is **noisier**, so `high` pairs it with stronger smoothing — but for
+  a side-biased capture like the sneaker, **`medium` still gives the smoothest,
+  cleanest-looking product surface**; `high` wins only when you want maximum
+  micro-detail and can tolerate a slightly more crumpled surface. Override any knob
+  per run, e.g. `SMOOTH=6`, `MASK_ERODE=6`, `MASKS=none`.
 
 ---
 
@@ -80,19 +104,38 @@ A `colima` + `linux/arm64` Docker container is the documented second fallback.
 1. `colmap image_undistorter --output_type COLMAP` — InterfaceCOLMAP only
    ingests **undistorted PINHOLE** models, so SIMPLE_RADIAL is undistorted first.
 2. `InterfaceCOLMAP` → `scene.mvs`.
+2b. **Foreground masks (optional, on for the sneaker).** Each source mask is
+   resampled to its undistorted image size, binarized, **eroded by `MASK_ERODE` px**
+   (to drop the soft silhouette fringe), and written as `<image>.mask.png` next to
+   the image. Needs Python + Pillow. Pass your own with `MASKS=<dir>`; disable with
+   `MASKS=none`.
 3. `DensifyPointCloud` → `scene_dense.mvs` (+ dense `.ply`). The heavy CPU stage.
-   Capped with `--resolution-level 1 --max-resolution N --number-views 5
-   --number-views-fuse 3` to bound RAM/time.
-4. `ReconstructMesh` → rough mesh `.ply` (`--remove-spurious 20 --close-holes 30
-   --smooth 2`).
+   Capped with `--resolution-level {0|1|2} --max-resolution N --number-views 5
+   --number-views-fuse 3`. When masks are staged it adds **`--ignore-mask-label 0`**
+   so the background is never densified. At `--resolution-level 0` it also adds
+   **`--estimate-roi 0 --crop-to-roi 0`** (see the level-0 gotcha below).
+4. `ReconstructMesh` → rough mesh `.ply` (`--remove-spurious $REMOVE_SPURIOUS
+   --close-holes 30 --smooth $SMOOTH`; both scale with the quality preset).
 4b. `RefineMesh` (**on by default**, `REFINE=1`) → `scene_dense_mesh_refine.ply`:
-   the official "recover all fine details" step. It also *cleans* the mesh — on the
-   sneaker it cut **210k → 73k faces**, dropping the disconnected background
-   flaps/spikes and tightening the silhouette (the magenta 3-stripes became
-   coherent). ~30 s on the sneaker. `REFINE=0` skips it.
+   the official "recover all fine details" step, now with
+   **`--regularity-weight $REGULARITY`** (higher = smoother). It also *cleans* the
+   mesh — on the sneaker `medium` lands at **~75k faces**, dropping disconnected
+   background flaps/spikes and tightening the silhouette. ~30–45 s. `REFINE=0` skips.
 5. `TextureMesh --export-type obj` → `scene_textured.obj` (+ `.mtl` + texture
    `.jpg`): **the viewable asset**. Textured from the **full-res `scene.mvs`**
    (not the half-res `scene_dense.mvs`) for a sharper atlas.
+
+> **Level-0 gotcha (full-res densify):** the prebuilt v2.4.0 `DensifyPointCloud`
+> **segfaults** inside its new ROI estimation/cropping when run at
+> `--resolution-level 0`. Disabling it (`--estimate-roi 0 --crop-to-roi 0`) lets
+> full-res densification finish (sneaker: 8k → ~800k points). Because ROI no longer
+> crops the scene, **foreground masking does the background removal instead** — which
+> is why `QUALITY=high` leans on the masks. Only applied at level 0; level 1+ ROI is
+> fine.
+
+> **RefineMesh `-w` gotcha:** RefineMesh resolves image paths relative to its working
+> folder, so it needs **`-w "$OUT"`** just like Densify/Texture; without it, it fails
+> with "failed loading image header". `run_openmvs.sh` passes `-w` to all stages.
 
 > **Note (important gotcha):** the prebuilt `ReconstructMesh` / `RefineMesh` write
 > only the mesh `.ply`, **not** a chained `.mvs`. So step 5 feeds `TextureMesh` the
@@ -141,40 +184,46 @@ The `model-viewer` script is cached next to the model on first run, so it works
 
 ## Results (measured on this M3 Pro, CPU-only)
 
-**Sneaker — 91 × 720×1280, max-res 1600, level 1:**
+**Sneaker — 91 × 720×1280, max-res 1600, masked.** Two presets, same machine:
 
-| Stage | Time | Output |
-|---|---:|---|
-| image_undistorter + InterfaceCOLMAP | ~2 s | `scene.mvs` |
-| DensifyPointCloud | ~48 s | `scene_dense.ply` — 233,331 points (17 MB) |
-| ReconstructMesh | ~6 s | rough mesh — 105,306 verts / 210,530 faces |
-| RefineMesh (`REFINE=1`) | ~31 s | refined mesh — 36,842 verts / **73,495 faces** (1.3 MB); background flaps removed |
-| TextureMesh (from `scene.mvs`) | ~26 s | `scene_textured.obj` 8.6 MB + texture 0.8 MB |
-| **Total** | **~2 min** | + `scene_textured.glb` 5.7 MB (for the viewer) |
+| Stage | `medium` (level 1) | `high` (level 0, ROI-off) |
+|---|---|---|
+| undistort + InterfaceCOLMAP + stage masks | ~10 s | ~12 s |
+| DensifyPointCloud | ~46 s · 210k pts | ~3 min · ~800k pts |
+| ReconstructMesh | ~7 s | ~16 s |
+| RefineMesh (`REFINE=1`) | ~30 s · **~75k faces** | ~46 s · **~279k faces** |
+| TextureMesh (from `scene.mvs`) | ~24 s · 8.3 MB obj | ~83 s · 32 MB obj |
+| **Total** | **~2 min** · `.glb` 5.8 MB | **~5.5 min** · `.glb` 21 MB |
 
-The small video frames make this far faster than a worst-case estimate. Larger
-inputs scale up:
+`medium` is the recommended canonical for the sneaker: the **mask erosion + stronger
+smoothing/regularity** give a visibly smoother outer surface and a tighter silhouette
+(z-extent 0.84 → 0.75) than the previous defaults, while `high` quadruples the face
+count for micro-detail at the cost of a slightly noisier (full-res depth) surface.
+
+Larger inputs scale up:
 
 | Dataset | Settings | Est. densify | Est. peak RAM |
 |---|---|---:|---:|
 | TripoPoor — 44 × 4000×3000 | max-res 2400, level 1 | ~1–4 h | ~12–28 GB |
 
-Levers if RAM/time blow up: raise `--resolution-level`, lower `--max-resolution`
-(e.g. 1800), keep `--number-views 5`, and avoid full-res `RefineMesh`.
+Levers if RAM/time blow up: raise `--resolution-level` (use `QUALITY=low`), lower
+`--max-resolution` (e.g. 1800), keep `--number-views 5`, and avoid `QUALITY=high`.
 
 ---
 
 ## Status & honest caveats
 
 - **Sneaker (best input):** 91 registered views → a complete textured mesh of
-  the captured side; the elongated shoe profile is clearly recovered. The
-  AI-generated source frames have busy backgrounds and no masks were applied, so
-  the *dense* mesh included background/support flaps around the shoe — **RefineMesh
-  (now on by default) removes most of them** and tightens the silhouette. For the
-  remainder, the real fix is foreground **masking** before densify
-  (`DensifyPointCloud … --ignore-mask-label 0`, masks named `name.ext.mask.png`
-  next to the undistorted images), reusing the BiRefNet masks from Part C. See the
-  Spanish runbook `../README.md` ("Pasos concretos") for copy-paste commands.
+  the captured side; the elongated shoe profile is clearly recovered. The outer
+  surface (green leather, magenta 3-stripes, gold "adidas TOKYO") is **smooth and
+  clean** now that foreground **masking is wired in by default**
+  (`DensifyPointCloud … --ignore-mask-label 0`, masks staged as `name.ext.mask.png`
+  next to the undistorted images, reusing the BiRefNet masks from Part C) together
+  with `RefineMesh` + mesh smoothing/erosion. What is **not** smooth is the shoe's
+  **interior cavity and far side** — those were barely photographed (the AI-source
+  capture orbits mostly one side), so they stay hollow/inferred. That is a
+  **capture-coverage** limit, not a pipeline bug: more overlapping views (incl. the
+  inside, the sole and the opposite side) are the only real fix.
 - **TripoPoor (hard input):** a real handheld orbit of a **white, reflective
   leather sneaker in dim light against a plain background**. The first COLMAP
   pass registered only 13/44 images into two fragmented sub-models; a
