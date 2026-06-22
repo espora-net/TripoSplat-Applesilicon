@@ -302,6 +302,102 @@ The trained splat itself (`tools/brush/out/black/sneaker_black_30000.ply`,
 62 k Gaussians, 14.7 MB) is **gitignored** (heavy/derived); regenerate it with
 `bash run_brush_splat.sh`.
 
+# Part D — coverage ablation against a retail benchmark (`run_colmap_synth.sh` + `synth` preset)  🔬
+
+**Question this answers:** *how far can our local COLMAP→OpenMVS pipeline get
+toward the quality of a professional retail 3D model, and what actually limits
+it?* The user pointed at the interactive 3D sneaker on the El Corte Inglés
+product page (a Vyking AR `<model-viewer>` asset) as the quality target.
+
+**Method — a controlled, idealised synthetic ablation.** That retail asset is a
+Draco-compressed GLB with a 4096×4096 PBR texture. We decode it locally
+(`@gltf-transform` + `draco3dgltf`; trimesh and `gltf-pipeline` both fail to
+decode Draco — they silently return all-zero vertices) and use it **only as a
+private measuring stick**. `render_synthetic.py` (VTK, offscreen) renders
+flat-lit, plain-grey-background views of the GLB plus **exact alpha masks** (from
+the z-buffer), in two sets that differ **mainly in pose coverage / view
+diversity**:
+
+| set    | views | trajectory                                                     |
+|--------|------:|----------------------------------------------------------------|
+| `full` |    90 | 3 elevation rings (−25/0/+25°) × 24 az + ±50° rings + top + sole |
+| `side` |    27 | a limited frontal-left arc (mimics the original video's bias)  |
+
+Both go through the **same** pipeline: `run_colmap_synth.sh` (COLMAP SfM,
+`SIMPLE_PINHOLE`, single camera, exhaustive match, deterministic mapper) then
+`QUALITY=max COLOR_NORM=0 run_openmvs.sh synth` (full-res densify L0 +
+RefineMesh L0 `--scales 3` + TextureMesh, exact masks staged).
+
+```bash
+# 1) render the two synthetic sets from the (local, gitignored) decoded GLB:
+#    node decode: @gltf-transform/core + draco3dgltf  ->  eci_tokyo_plain.glb
+python3 render_synthetic.py eci_tokyo_plain.glb synthetic_ref/full full 1280
+python3 render_synthetic.py eci_tokyo_plain.glb synthetic_ref/side side 1280
+# 2) SfM + dense MVS for each:
+bash run_colmap_synth.sh full   &&  SYNTH_SET=full QUALITY=max COLOR_NORM=0 bash ../openmvs/run_openmvs.sh synth
+bash run_colmap_synth.sh side   &&  SYNTH_SET=side QUALITY=max COLOR_NORM=0 bash ../openmvs/run_openmvs.sh synth
+# 3) inspect (turntable + clay):
+python3 render_obj_turntable.py synthetic_ref/full/openmvs/scene_textured.obj  /tmp/full.png
+python3 render_geo_turntable.py synthetic_ref/full/openmvs/scene_dense_mesh_refine.ply /tmp/full_geo.png
+```
+
+### Result
+
+- **COLMAP registration:** `full` = **76/90** images, mean reproj **0.44 px**;
+  `side` = **27/27**, 0.44 px. The **14 dropped** `full` views are almost all the
+  **underside ring** (el = −50°: 7/8 dropped; plus the straight-up sole) — the
+  low-angle sole views carry the least distinctive geometry/texture. The
+  collar/top views (el = +25/+50/+82°) **did** register.
+- **`full` reconstruction** (~490 k-face refined mesh): complete silhouette;
+  **uniform** green (no multi-tone); magenta stripes, gold “adidas Tokyo” text
+  legible; suede toe/heel correct; **laces, eyelets, stitching and the 3-stripes
+  in genuine 3D relief** (clay render confirms the fine surface).
+- **`side` reconstruction:** the captured face looks fine, but the far side /
+  heel / back are **hollow with large holes** — the same incomplete-shell failure
+  the original side-biased *video* capture produced.
+- **Residual `full` defect:** the foot-opening / collar (a **concave cavity**
+  walled by the **low-texture green upper**) is **bridged into a smooth dome**;
+  the tan footbed reads over the top. Two cheap diagnostics localise the cause:
+  (1) `CLOSE_HOLES=0` vs `12` → **identical** geometry, so it is **not** final
+  hole-closing; (2) clay render **pre- vs post-RefineMesh** → the dome is
+  **already present in the dense `ReconstructMesh` output** and unchanged by
+  refinement, so it is **not** refinement smoothing. The dome is therefore
+  **dense-MVS / surface-reconstruction interpolation over weak photometric
+  evidence** on the textureless concave opening.
+
+### What this does and does **not** claim
+
+- ✅ In this synthetic ablation, **broader pose coverage / view diversity is the
+  main changed capture condition**, and it strongly explains the missing-heel /
+  hollow-shell failures: same GLB, same pipeline, coverage differs → `full` is
+  complete where `side` is holed.
+- ✅ Under **idealised** synthetic capture (exact masks, uniform lighting,
+  `COLOR_NORM=0`, no sensor/compression noise), the pipeline **preserves
+  high-frequency visible texture and recovers fine surface relief approaching the
+  visual benchmark**.
+- ⚠️ **Same-source circularity:** the synthetic views are rendered from the
+  **same** retail texture we compare against, so the colour/texture agreement is
+  **not** an independent real-world acquisition result. It does **not** prove the
+  local pipeline could match the retail asset from real photos.
+- ⚠️ The uniform-green result also benefits from **uniform synthetic lighting**;
+  this does not prove coverage *alone* fixed the original multi-tone green (the
+  AI-video frames also carried lighting/generation artifacts).
+- ⚠️ The domed collar is a **characteristic MVS failure mode on low-texture,
+  concave/open geometry** — *likely* improvable (more inward/collar views,
+  different meshing/regularisation, manual cleanup), **not proven inherent**. The
+  retail asset avoids it because it is **artist-modelled / artist-cleaned**, not
+  photogrammetric.
+- ⚠️ The comparison is **visual**, not metric (no mesh-to-mesh distance / matched-
+  view image diff), and “max quality” here means the practical pipeline maximum,
+  not an absolute optimum.
+
+> **Provenance / copyright.** The reference GLB and **all** derived renders,
+> masks, COLMAP/OpenMVS outputs under `synthetic_ref/` are **copyrighted retail
+> assets**, kept strictly **local and gitignored**, used **only** as a private
+> research benchmark — never committed, redistributed or shipped. Only the
+> original tooling (`render_synthetic.py`, `run_colmap_synth.sh`, the
+> `render_*_turntable.py` viewers, the `synth` preset) is committed.
+
 ## Apple Silicon notes — the brush 3DGS step (Part C)
 
 - Prebuilt binary: `gh release download v0.3.0 -R ArthurBrussee/brush -p

@@ -145,6 +145,50 @@ MASKS=none    bash openmvs/run_openmvs.sh sneaker   # no recortar el fondo
 
 ---
 
+## 🔬 La prueba que lo demuestra: ¿cuánta calidad alcanzamos con cobertura completa?
+
+Para responder a *"¿podemos llegar a la calidad de una zapatilla 3D profesional?"*
+hicimos un experimento controlado. Como **vara de medir** (en privado, sin
+publicar nada) usamos el **modelo 3D profesional de esta misma zapatilla** que se
+puede girar en la web de El Corte Inglés. A partir de él generamos fotos limpias
+y **lo pasamos por nuestro propio proceso** en dos versiones:
+
+- **Cobertura COMPLETA**: 90 fotos dando toda la vuelta (por arriba, por los
+  lados, por debajo, puntera y talón).
+- **Cobertura SESGADA**: solo 27 fotos de un lado (como hacían los vídeos de
+  antes).
+
+**Lo que salió:**
+
+- Con **cobertura completa**, el resultado da un salto enorme: el **verde queda
+  uniforme** (sin manchas de varios tonos), las **franjas magenta y el texto
+  dorado "adidas Tokyo" se leen nítidos**, la puntera y el talón de ante salen
+  bien, y aparecen en relieve real los **cordones, los ojales y las costuras**. La
+  forma está **completa por los cuatro costados**.
+- Con **solo un lado**, la zapatilla sale **hueca y con agujeros** por la parte de
+  atrás y el lado contrario — exactamente los mismos fallos que veíamos antes con
+  los vídeos.
+
+**La conclusión (lo más importante):** la **cobertura de las fotos es lo que más
+decide la calidad**. Dar toda la vuelta elimina los huecos del talón y la parte
+trasera. Es justo lo que explica la sección A de arriba, ahora comprobado.
+
+**Lo único que el proceso todavía no resuelve solo:** la **boca de la zapatilla**
+(por donde entra el pie). Como el empeine verde es una superficie lisa **sin
+apenas detalle**, el programa no tiene "pistas" para calcular su forma exacta y
+**la cierra con una cúpula lisa** en lugar de dejar el hueco abierto. Un modelo
+profesional no tiene este problema porque **lo ha modelado un artista a mano**,
+no a partir de fotos. Se puede mejorar (más fotos asomándose al interior, o un
+retoque manual de la malla), pero es la parte más difícil de la fotogrametría.
+
+> **Nota.** Este modelo profesional y todas las imágenes derivadas son material
+> con derechos de autor: se usaron **solo en local como referencia privada**, no
+> se suben al repositorio ni se redistribuyen. Lo que sí queda guardado son
+> **nuestras herramientas** para repetir la prueba (`colmap_sneaker/render_synthetic.py`,
+> `colmap_sneaker/run_colmap_synth.sh` y el preset `synth` de `run_openmvs.sh`).
+
+---
+
 ## 🔧 Pasos concretos para mejorar el modelo que ya tenemos (avanzado)
 
 > Basado en la [documentación oficial de OpenMVS](https://github.com/cdcseacave/openMVS/wiki/Usage)

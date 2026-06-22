@@ -39,26 +39,44 @@ bash view_mesh.sh sneaker          # drag = rotate · scroll = zoom · right-dra
 
 That's the whole flow. Steps 2–3 are repeatable; step 1 is one-time.
 
-### Quality presets (`QUALITY=high|medium|low`, default `medium`)
+### Quality presets (`QUALITY=max|high|medium|low`, default `medium`)
 
 Two independent axes drive the result, and they **trade off**:
 
-| `QUALITY` | densify `--resolution-level` | refine `--max-face-area` | smooth / remove-spurious / regularity / mask-erode | sneaker faces |
-|---|---|---|---|---|
-| `high`   | 0 (full res) | 8  | 4 / 40 / 0.35 / 4 | ~279k |
-| `medium` | 1 (half res) | 16 | 3 / 30 / 0.25 / 3 | ~75k  |
-| `low`    | 2 (¼ res)    | 32 | 2 / 20 / 0.20 / 2 | ~30k  |
+| `QUALITY` | densify `--resolution-level` | refine `--max-face-area` / `--scales` | smooth / remove-spurious / regularity / mask-erode | extras | sneaker faces |
+|---|---|---|---|---|---|
+| `max`    | 0 (full res) | 6 / 3  | 3 / 50 / 0.25 / 3 | `COLOR_NORM=1`, `--virtual-face-images 3`, `--close-holes 12` | ~241k |
+| `high`   | 0 (full res) | 8 / 2  | 4 / 40 / 0.35 / 4 | — | ~279k |
+| `medium` | 1 (half res) | 16 / 2 | 3 / 30 / 0.25 / 3 | — | ~75k  |
+| `low`    | 2 (¼ res)    | 32 / 2 | 2 / 20 / 0.20 / 2 | — | ~30k  |
 
 - **DETAIL** scales with `--resolution-level` (full res ⇒ ~4× the points ⇒ many more
-  triangles and sharper micro-relief).
+  triangles and sharper micro-relief). `max` additionally refines at full image
+  resolution with more `--scales` and the finest faces.
 - **SMOOTHNESS/CLEANLINESS** comes from `ReconstructMesh --smooth/--remove-spurious`,
   `RefineMesh --regularity-weight`, and eroding the foreground mask to shave
   silhouette slivers ("flaps").
-- Full-res depth is **noisier**, so `high` pairs it with stronger smoothing — but for
+- Full-res depth is **noisier**, so `high`/`max` pair it with stronger smoothing — but for
   a side-biased capture like the sneaker, **`medium` still gives the smoothest,
-  cleanest-looking product surface**; `high` wins only when you want maximum
+  cleanest-looking product surface**; `high`/`max` win only when you want maximum
   micro-detail and can tolerate a slightly more crumpled surface. Override any knob
   per run, e.g. `SMOOTH=6`, `MASK_ERODE=6`, `MASKS=none`.
+
+**`QUALITY=max`-only knobs** (also settable on any preset):
+
+- **`COLOR_NORM=1`** — harmonise per-frame exposure/white-balance **before**
+  texturing. A two-pass step scales each image's masked-foreground per-channel
+  mean toward the global mean (gain clipped [0.5, 2.0]; originals backed up to
+  `images_orig/`). This is the **multi-tone-green fix**: OpenMVS' own
+  seam-leveling explodes into saturated colour blobs on these video frames (kept
+  OFF — see TextureMesh), so `COLOR_NORM` flattens colour at the input instead.
+  It is an empirical texture-consistency step, not true colorimetric correction.
+- **`CLOSE_HOLES=12`** (vs default 30) — bridge **fewer** small holes so the
+  under-shot collar opening is **not** capped by a flat untextured "lid".
+- **`EMPTY_COLOR=1710618`** (#1A1A1A) — colour for faces no camera textured;
+  near-black reads as natural interior shadow instead of the jarring bright-grey
+  patch the user flagged ("la parte de atrás en blanco"). OpenMVS' default is
+  orange (16744231).
 
 ---
 
@@ -95,7 +113,7 @@ A `colima` + `linux/arm64` Docker container is the documented second fallback.
 | Script | What it does |
 |---|---|
 | `get_openmvs.sh` | Download + de-quarantine the **official** macOS arm64 OpenMVS binaries into `prebuilt/`. One-time, seconds. |
-| `run_openmvs.sh {sneaker\|tripopoor}` | Full 6-stage COLMAP→OpenMVS pipeline (incl. RefineMesh) → textured `.obj` + dense/mesh `.ply`. |
+| `run_openmvs.sh {sneaker\|tripopoor\|synth}` | Full 6-stage COLMAP→OpenMVS pipeline (incl. RefineMesh) → textured `.obj` + dense/mesh `.ply`. `synth` = the coverage-ablation set (see `../colmap_sneaker` README "Part D"). |
 | `view_mesh.sh {sneaker\|tripopoor\|/path/to.obj}` | Export a portable `.glb` and serve an interactive `<model-viewer>` page (orbit/zoom/pan). |
 | `build_openmvs.sh` | *Fallback only:* compile OpenMVS from source via vcpkg. |
 
@@ -106,9 +124,17 @@ A `colima` + `linux/arm64` Docker container is the documented second fallback.
 2. `InterfaceCOLMAP` → `scene.mvs`.
 2b. **Foreground masks (optional, on for the sneaker).** Each source mask is
    resampled to its undistorted image size, binarized, **eroded by `MASK_ERODE` px**
-   (to drop the soft silhouette fringe), and written as `<image>.mask.png` next to
+   (to drop the soft silhouette fringe), and written as **`<stem>.mask.png`** next to
    the image. Needs Python + Pillow. Pass your own with `MASKS=<dir>`; disable with
    `MASKS=none`.
+
+   > **Mask-naming bug (fixed — important).** OpenMVS v2.x reads each mask as
+   > `<image-stem>.mask.png` — it **replaces** the image extension, so `zoom_027.jpg`
+   > → `zoom_027.mask.png` (**not** `zoom_027.jpg.mask.png`). The previous code
+   > appended instead of replacing, so masking was **silently disabled**: at
+   > `QUALITY=medium` (level 1) ROI auto-crop hid it, but at `high`/`max` (level 0,
+   > ROI off) the background fused into large flat "sail" flaps. Now staged with the
+   > extension replaced — 0 mask-load warnings, flaps gone.
 3. `DensifyPointCloud` → `scene_dense.mvs` (+ dense `.ply`). The heavy CPU stage.
    Capped with `--resolution-level {0|1|2} --max-resolution N --number-views 5
    --number-views-fuse 3`. When masks are staged it adds **`--ignore-mask-label 0`**
@@ -217,13 +243,18 @@ Levers if RAM/time blow up: raise `--resolution-level` (use `QUALITY=low`), lowe
   the captured side; the elongated shoe profile is clearly recovered. The outer
   surface (green leather, magenta 3-stripes, gold "adidas TOKYO") is **smooth and
   clean** now that foreground **masking is wired in by default**
-  (`DensifyPointCloud … --ignore-mask-label 0`, masks staged as `name.ext.mask.png`
+  (`DensifyPointCloud … --ignore-mask-label 0`, masks staged as `<stem>.mask.png`
   next to the undistorted images, reusing the BiRefNet masks from Part C) together
   with `RefineMesh` + mesh smoothing/erosion. What is **not** smooth is the shoe's
   **interior cavity and far side** — those were barely photographed (the AI-source
   capture orbits mostly one side), so they stay hollow/inferred. That is a
   **capture-coverage** limit, not a pipeline bug: more overlapping views (incl. the
-  inside, the sole and the opposite side) are the only real fix.
+  inside, the sole and the opposite side) are the only real fix. **This is now
+  demonstrated** by a controlled synthetic coverage ablation (same pipeline, full
+  360° vs side-biased views rendered from a retail reference) — see
+  `../colmap_sneaker/README.md` **"Part D"**: full coverage closes the hollow far
+  side/heel; the one residual is the textureless concave collar (a dense-MVS
+  interpolation limit, not coverage).
 - **TripoPoor (hard input):** a real handheld orbit of a **white, reflective
   leather sneaker in dim light against a plain background**. The first COLMAP
   pass registered only 13/44 images into two fragmented sub-models; a

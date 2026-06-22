@@ -23,15 +23,20 @@
 # Usage:
 #   bash run_openmvs.sh sneaker      # the 91-view Adidas Tokyo COLMAP model
 #   bash run_openmvs.sh tripopoor    # the TripoPoor capture (largest HQ model)
+#   SYNTH_SET=full QUALITY=max COLOR_NORM=0 bash run_openmvs.sh synth  # coverage-ablation
+#                                    # synthetic views of the retail GLB (full|side); see
+#                                    # ../colmap_sneaker run_colmap_synth.sh + README "Part D"
 #   OPENMVS_BIN=/path bash run_openmvs.sh <preset>
+#   QUALITY=max  bash run_openmvs.sh <preset>      # full-res densify + full-res refine + colour-norm (best)
 #   QUALITY=high bash run_openmvs.sh <preset>      # full-res densify+refine (most detail)
 #   QUALITY=low  bash run_openmvs.sh <preset>      # quarter-res (fastest, coarse)
 #   MASKS=<dir>  bash run_openmvs.sh <preset>      # drop background via fg masks
 #   MASKS=none   bash run_openmvs.sh <preset>      # disable the preset's default masks
 #   SMOOTH=6 bash run_openmvs.sh <preset>          # smoother surface (more Laplacian iters)
 #   MASK_ERODE=6 bash run_openmvs.sh <preset>      # shave more silhouette "flaps"
+#   COLOR_NORM=1 bash run_openmvs.sh <preset>      # harmonise frame exposure/white-balance (uniform colour)
 #   REFINE=0 bash run_openmvs.sh <preset>          # skip RefineMesh (faster)
-#   SEAM_LEVELING=1 bash run_openmvs.sh <preset>   # restore OpenMVS seam leveling
+#   SEAM_LEVELING=1 bash run_openmvs.sh <preset>   # restore OpenMVS seam leveling (WARNING: blobs on video frames)
 set -uo pipefail
 
 PRESET="${1:-}"
@@ -74,33 +79,68 @@ case "$PRESET" in
     DENSIFY_MAX=2400
     MASKS_DEFAULT=""        # no foreground masks for this capture (yet)
     ;;
+  synth)
+    # Coverage-ablation: synthetic views rendered from the reference El Corte
+    # Ingles / Vyking GLB (render_synthetic.py) + COLMAP (run_colmap_synth.sh).
+    # SYNTH_SET=full (default, ~90 views, 360 coverage) or side (limited arc).
+    # Proves the pipeline reaches retail quality GIVEN full coverage; the masks
+    # are exact (z-buffer silhouettes), and lighting is already uniform so
+    # COLOR_NORM is unnecessary here (default off via SET below).
+    SYNTH_SET="${SYNTH_SET:-full}"
+    SROOT="$EXP/colmap_sneaker/synthetic_ref/$SYNTH_SET"
+    COLMAP_MODEL="$SROOT/ws/sparse/0"
+    COLMAP_IMAGES="$SROOT/images"
+    OUT="$SROOT/openmvs"
+    UNDISTORT_MAX=1280      # renders are 1280x1280
+    DENSIFY_MAX=1280
+    MASKS_DEFAULT="$SROOT/masks"   # exact z-buffer silhouettes (one per view)
+    ;;
   *)
-    echo "usage: bash run_openmvs.sh {sneaker|tripopoor}"; exit 2 ;;
+    echo "usage: bash run_openmvs.sh {sneaker|tripopoor|synth}"; exit 2 ;;
 esac
 
 # ---- quality preset --------------------------------------------------------
-# QUALITY=high|medium|low (default medium = the rubber-duck-validated baseline).
+# QUALITY=max|high|medium|low (default medium = the rubber-duck-validated baseline).
 # Two independent axes matter for a product render:
 #   * DETAIL  -> DensifyPointCloud --resolution-level (0=full res, 1=half, 2=quarter)
-#               and RefineMesh --max-face-area (smaller = more, finer triangles).
+#               and RefineMesh --resolution-level / --max-face-area / --scales
+#               (smaller face area + lower level + more scales = finer geometry).
 #   * SMOOTHNESS/CLEANLINESS -> ReconstructMesh --smooth / --remove-spurious and
 #               RefineMesh --regularity-weight, plus eroding the foreground mask
 #               to shave the silhouette slivers ("flaps") off the outline.
-# Full-resolution densification (high) yields the most triangles but also the
-# noisiest depth, so high pairs it with stronger smoothing + spurious removal +
+# Full-resolution densification (high/max) yields the most triangles but also the
+# noisiest depth, so they pair it with stronger smoothing + spurious removal +
 # regularization so the extra detail does not just become a crumpled surface.
+# QUALITY=max additionally refines the mesh at FULL image resolution
+# (--resolution-level 0, more --scales) and uses the finest faces, then turns on
+# COLOR_NORM (exposure/white-balance harmonisation of the input frames) to fight
+# the multi-tone look -- because OpenMVS' own seam-leveling explodes into
+# saturated colour blobs on these video frames (kept OFF; see TextureMesh below).
+# NOTE: full-res densification produces far more silhouette-boundary points, so
+# max needs MORE mask erosion + spurious removal (not less) to suppress the flat
+# "sail" flaps that otherwise bridge across the mask edge -- hence ERODE/SPURIOUS
+# are higher here, balanced by the finer faces preserving genuine surface relief.
 # Knobs below can be overridden per-run (e.g. SMOOTH=6 QUALITY=high ...).
 QUALITY="${QUALITY:-medium}"
 case "$QUALITY" in
-  high)   RES_LEVEL=0; REFINE_RES=1; MAX_FACE_AREA=8;  SMOOTH_DEF=4; SPURIOUS_DEF=40; REGULARITY_DEF=0.35; ERODE_DEF=4 ;;
-  medium) RES_LEVEL=1; REFINE_RES=1; MAX_FACE_AREA=16; SMOOTH_DEF=3; SPURIOUS_DEF=30; REGULARITY_DEF=0.25; ERODE_DEF=3 ;;
-  low)    RES_LEVEL=2; REFINE_RES=2; MAX_FACE_AREA=32; SMOOTH_DEF=2; SPURIOUS_DEF=20; REGULARITY_DEF=0.20; ERODE_DEF=2 ;;
-  *) echo "QUALITY must be high|medium|low (got '$QUALITY')"; exit 2 ;;
+  max)    RES_LEVEL=0; REFINE_RES=0; MAX_FACE_AREA=6;  SMOOTH_DEF=3; SPURIOUS_DEF=50; REGULARITY_DEF=0.25; ERODE_DEF=3; SCALES_DEF=3; CNORM_DEF=1; VF_DEF=3; CLOSE_DEF=12 ;;
+  high)   RES_LEVEL=0; REFINE_RES=1; MAX_FACE_AREA=8;  SMOOTH_DEF=4; SPURIOUS_DEF=40; REGULARITY_DEF=0.35; ERODE_DEF=4; SCALES_DEF=2; CNORM_DEF=0; VF_DEF=0; CLOSE_DEF=30 ;;
+  medium) RES_LEVEL=1; REFINE_RES=1; MAX_FACE_AREA=16; SMOOTH_DEF=3; SPURIOUS_DEF=30; REGULARITY_DEF=0.25; ERODE_DEF=3; SCALES_DEF=2; CNORM_DEF=0; VF_DEF=0; CLOSE_DEF=30 ;;
+  low)    RES_LEVEL=2; REFINE_RES=2; MAX_FACE_AREA=32; SMOOTH_DEF=2; SPURIOUS_DEF=20; REGULARITY_DEF=0.20; ERODE_DEF=2; SCALES_DEF=2; CNORM_DEF=0; VF_DEF=0; CLOSE_DEF=30 ;;
+  *) echo "QUALITY must be max|high|medium|low (got '$QUALITY')"; exit 2 ;;
 esac
-# Mesh-cleanup knobs (per-quality defaults, overridable per run):
+# Mesh-cleanup / refinement knobs (per-quality defaults, overridable per run):
 SMOOTH="${SMOOTH:-$SMOOTH_DEF}"               # ReconstructMesh Laplacian smoothing iterations
 REMOVE_SPURIOUS="${REMOVE_SPURIOUS:-$SPURIOUS_DEF}"  # drop faces with over-long edges / isolated bits (kills flaps)
 REGULARITY="${REGULARITY:-$REGULARITY_DEF}"   # RefineMesh regularity weight (higher = smoother)
+REFINE_SCALES="${REFINE_SCALES:-$SCALES_DEF}" # RefineMesh multi-scale optimization iterations
+COLOR_NORM="${COLOR_NORM:-$CNORM_DEF}"        # 1 = harmonise exposure/white-balance across frames before texturing
+VIRTUAL_FACES="${VIRTUAL_FACES:-$VF_DEF}"     # TextureMesh: merge coplanar faces seen by >= N views into one patch (0=off)
+CLOSE_HOLES="${CLOSE_HOLES:-$CLOSE_DEF}"      # max bridges fewer-pixel holes so the under-shot top opening is not capped by a flat untextured "lid"
+# Colour for faces no camera ever textured (the under-captured concave top/heel).
+# A near-black (#1A1A1A=1710618) reads as natural interior shadow instead of the
+# jarring bright-grey/white patch the user flagged ("la parte de atras en blanco").
+EMPTY_COLOR="${EMPTY_COLOR:-1710618}"
 
 # ---- foreground masking (optional but recommended) -------------------------
 # MASKS=<dir> with one foreground mask per source image (black=background,
@@ -121,7 +161,7 @@ LOG_DIR="$OUT"; mkdir -p "$OUT"
 LOG="$OUT/openmvs.log"; : > "$LOG"
 log(){ echo "[$(date +%H:%M:%S)] $*" | tee -a "$LOG"; }
 
-log "preset=$PRESET  quality=$QUALITY  (resolution-level=$RES_LEVEL refine-level=$REFINE_RES max-face-area=$MAX_FACE_AREA smooth=$SMOOTH remove-spurious=$REMOVE_SPURIOUS regularity=$REGULARITY mask-erode=$MASK_ERODE)"
+log "preset=$PRESET  quality=$QUALITY  (resolution-level=$RES_LEVEL refine-level=$REFINE_RES max-face-area=$MAX_FACE_AREA scales=$REFINE_SCALES smooth=$SMOOTH remove-spurious=$REMOVE_SPURIOUS regularity=$REGULARITY mask-erode=$MASK_ERODE color-norm=$COLOR_NORM)"
 log "OpenMVS bin: $OPENMVS_BIN"
 [ -x "$OPENMVS_BIN/DensifyPointCloud" ] || { log "OpenMVS binaries not found -> run ../openmvs/get_openmvs.sh (prebuilt) or build_openmvs.sh"; exit 1; }
 command -v colmap >/dev/null || { log "colmap missing"; exit 1; }
@@ -159,9 +199,14 @@ log "       InterfaceCOLMAP exit=$?  -> $(ls -la "$SCENE" 2>/dev/null | awk '{pr
 
 # ---------------------------------------------------------------------------
 # 2b) Stage foreground masks (optional) next to the undistorted images so
-#     DensifyPointCloud can drop the background. OpenMVS looks for a file named
-#     '<image>.mask.png' beside each image; black(0)=ignored, white=object.
-#     Masks are resampled to each undistorted image's exact size and binarized.
+#     DensifyPointCloud can drop the background. OpenMVS (v2.x) looks for a file
+#     named '<image-stem>.mask.png' beside each image -- i.e. it REPLACES the
+#     image extension, so for 'zoom_027.jpg' it reads 'zoom_027.mask.png' (NOT
+#     'zoom_027.jpg.mask.png'). Getting this name wrong silently disables masking:
+#     DensifyPointCloud then keeps the background, which at resolution-level 0
+#     (ROI estimation disabled to avoid the v2.4.0 segfault) shows up as large flat
+#     "sail" flaps of ground/backdrop fused onto the shoe. black(0)=ignored,
+#     white=object. Masks are resampled to each image's size and binarized.
 # ---------------------------------------------------------------------------
 MASK_ARGS=()
 MASK_LABEL=""
@@ -187,7 +232,8 @@ for img in sorted(glob.glob(os.path.join(imgdir, "*"))):
         # shrink the foreground so the soft silhouette fringe does not survive
         # as thin boundary slivers ("flaps") in the dense cloud/mesh.
         m = m.filter(ImageFilter.MinFilter(2 * erode + 1))
-    m.save(img + ".mask.png")
+    # OpenMVS wants '<stem>.mask.png' (extension REPLACED), e.g. zoom_027.mask.png
+    m.save(os.path.join(os.path.dirname(img), stem + ".mask.png"))
     n += 1
 print(n)
 PY
@@ -209,6 +255,19 @@ fi
 ROI_ARGS=()
 ROI_LABEL=""
 if [ "$RES_LEVEL" = "0" ]; then ROI_ARGS=(--estimate-roi 0 --crop-to-roi 0); ROI_LABEL=" roi-off"; fi
+# DensifyPointCloud caches per-view depthNNNN.dmap files in the working folder and
+# reuses any it finds. Those depth maps are computed at a specific resolution-level
+# and against specific (e.g. masked) images, so reusing maps from a previous run at
+# a DIFFERENT level/mask silently produces stale geometry (a level-0 run that finds
+# level-1 maps "finishes" in seconds with wrong data). Track the level/mask combo
+# the cached maps belong to and wipe them whenever it changes.
+DMAP_TAG="L${RES_LEVEL}${MASK_LABEL// /_}"
+if [ -f "$OUT/.densify_tag" ] && [ "$(cat "$OUT/.densify_tag")" = "$DMAP_TAG" ]; then
+  log "       reusing cached depth maps (tag=$DMAP_TAG)"
+else
+  log "       densify settings changed (tag=$DMAP_TAG) -> clearing cached *.dmap"
+  rm -f "$OUT"/*.dmap
+fi
 log "step 3/5  DensifyPointCloud (resolution-level=$RES_LEVEL max-resolution=$DENSIFY_MAX$ROI_LABEL$MASK_LABEL)"
 "$OPENMVS_BIN/DensifyPointCloud" "$SCENE" \
   -w "$OUT" \
@@ -221,6 +280,7 @@ log "step 3/5  DensifyPointCloud (resolution-level=$RES_LEVEL max-resolution=$DE
   "${MASK_ARGS[@]+"${MASK_ARGS[@]}"}" \
   >> "$LOG" 2>&1
 log "       DensifyPointCloud exit=$?"
+printf '%s' "$DMAP_TAG" > "$OUT/.densify_tag"
 
 # ---------------------------------------------------------------------------
 # 4) Surface mesh from the dense cloud.
@@ -232,7 +292,7 @@ log "step 4/6  ReconstructMesh (smooth=$SMOOTH remove-spurious=$REMOVE_SPURIOUS)
   -o "$OUT/scene_dense_mesh.mvs" \
   --decimate 1 \
   --remove-spurious "$REMOVE_SPURIOUS" \
-  --close-holes 30 \
+  --close-holes "$CLOSE_HOLES" \
   --smooth "$SMOOTH" \
   >> "$LOG" 2>&1
 log "       ReconstructMesh exit=$?"
@@ -259,10 +319,10 @@ if [ "$REFINE" = "1" ]; then
     -w "$OUT" \
     -o "$OUT/scene_dense_mesh_refine.mvs" \
     --resolution-level "$REFINE_RES" \
-    --scales 1 \
+    --scales "$REFINE_SCALES" \
     --max-face-area "$MAX_FACE_AREA" \
     --regularity-weight "$REGULARITY" \
-    --close-holes 60 \
+    --close-holes "$CLOSE_HOLES" \
     >> "$LOG" 2>&1
   log "       RefineMesh exit=$?"
   if [ -f "$OUT/scene_dense_mesh_refine.ply" ]; then
@@ -270,6 +330,69 @@ if [ "$REFINE" = "1" ]; then
   else
     log "       RefineMesh produced no mesh -> texturing the raw dense mesh instead"
   fi
+fi
+
+# ---------------------------------------------------------------------------
+# 4c) Colour/exposure harmonisation (COLOR_NORM=1) of the undistorted frames.
+#     Why: TextureMesh picks the best single view per face, so neighbouring faces
+#     sourced from frames shot under slightly different auto-exposure/white-balance
+#     show visible colour jumps (e.g. the green leather drifting between teal and
+#     grass-green). OpenMVS' own global/local seam-leveling is the textbook fix BUT
+#     on these video frames it diverges into saturated primary-colour blobs (kept
+#     OFF below). Instead we equalise the frames ourselves: scale each image's
+#     per-channel mean (measured INSIDE the foreground mask, so the background does
+#     not skew it) to the global mean across all frames. That removes the inter-
+#     frame exposure/white-balance drift while preserving real texture detail, so
+#     the untouched seam-leveling-off texture comes out far more uniform.
+#     A one-time backup (images_orig/) lets repeated runs start from the originals.
+# ---------------------------------------------------------------------------
+if [ "$COLOR_NORM" = "1" ]; then
+  log "step 4c/6 colour/exposure harmonisation of $UND/images (COLOR_NORM=1)"
+  IMG_DIR="$UND/images" python3 - <<'PY' 2>>"$LOG"
+import os, glob, numpy as np
+from PIL import Image
+d = os.environ["IMG_DIR"]
+orig = os.path.join(os.path.dirname(d), "images_orig")
+os.makedirs(orig, exist_ok=True)
+imgs = [p for p in sorted(glob.glob(os.path.join(d, "*")))
+        if not p.endswith(".mask.png")
+        and p.lower().endswith((".jpg", ".jpeg", ".png"))]
+# restore-from-backup (so re-runs are idempotent) or seed the backup
+for p in imgs:
+    b = os.path.join(orig, os.path.basename(p))
+    if os.path.exists(b):
+        Image.open(b).save(p)
+    else:
+        Image.open(p).save(b)
+# pass 1: global foreground per-channel mean
+gsum = np.zeros(3); gcnt = 0.0
+stats = {}
+for p in imgs:
+    im = np.asarray(Image.open(p).convert("RGB"), dtype=np.float64)
+    mp = os.path.splitext(p)[0] + ".mask.png"   # OpenMVS '<stem>.mask.png'
+    if os.path.exists(mp):
+        m = np.asarray(Image.open(mp).convert("L")) > 127
+    else:
+        m = np.ones(im.shape[:2], dtype=bool)
+    if m.sum() < 50:
+        m = np.ones(im.shape[:2], dtype=bool)
+    fg = im[m]
+    stats[p] = (fg.mean(axis=0), m)
+    gsum += fg.sum(axis=0); gcnt += m.sum()
+gmean = gsum / max(gcnt, 1.0)
+# pass 2: per-image multiplicative gain so its fg mean matches the global mean
+n = 0
+for p in imgs:
+    imean, _ = stats[p]
+    gain = gmean / np.clip(imean, 1e-3, None)
+    gain = np.clip(gain, 0.5, 2.0)            # avoid extreme corrections
+    im = np.asarray(Image.open(p).convert("RGB"), dtype=np.float64)
+    im = np.clip(im * gain, 0, 255).astype(np.uint8)
+    Image.fromarray(im).save(p, quality=95)
+    n += 1
+print(f"harmonised {n} frames; global fg mean = {gmean.round(1)}")
+PY
+  log "       colour harmonisation done"
 fi
 
 # ---------------------------------------------------------------------------
@@ -296,9 +419,10 @@ log "step 5/6  TextureMesh (from full-res scene.mvs; mesh=$(basename "$MESH"); s
   -o "$OUT/scene_textured.mvs" \
   --resolution-level 0 \
   --max-texture-size 8192 \
+  --virtual-face-images "$VIRTUAL_FACES" \
   --global-seam-leveling "$SEAM" \
   --local-seam-leveling "$SEAM" \
-  --empty-color 8421504 \
+  --empty-color "$EMPTY_COLOR" \
   --export-type obj \
   >> "$LOG" 2>&1
 log "       TextureMesh exit=$?"
