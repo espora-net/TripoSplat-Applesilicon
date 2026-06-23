@@ -17,3 +17,8 @@ input_images/cameras.json
 # GLB de referencia de retail (con copyright): local, NUNCA se commitea.
 # (El README.txt de la carpeta sí se versiona para documentar la procedencia.)
 reference_glb/*.glb
+
+# Modelo 3D RESULTADO (derivado del GLB de retail con copyright): local, NO se commitea.
+# Todo result_model/ excepto su README.txt.
+result_model/*
+!result_model/README.txt

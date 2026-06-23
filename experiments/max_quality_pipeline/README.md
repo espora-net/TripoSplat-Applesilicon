@@ -22,15 +22,25 @@ ver [`REPLICAR_CON_TUS_FOTOS.md`](./REPLICAR_CON_TUS_FOTOS.md)).
 
 ## 1. Resultado y cómo verlo en el visor
 
-El resultado texturizado es `synthetic_ref/full2/openmvs/scene_textured.obj`
-(+ `.mtl` + atlas `..._map_Kd.jpg`) y su versión GLB para web `full2.glb`.
+El modelo 3D resultado está **dentro de esta carpeta**, en **`result_model/`** (copia
+autocontenida, *gitignored* por copyright):
+
+```
+result_model/full2.glb                              ← GLB listo para web (el que usa el visor)
+result_model/scene_textured.obj (+ .mtl + atlas)    ← malla texturizada (MeshLab/Blender)
+```
+
+(Es una copia de la salida del pipeline `../colmap_sneaker/synthetic_ref/full2/openmvs/`.)
 
 **Abrir el visor interactivo** (girar / zoom / desplazar), desde esta carpeta:
 
 ```bash
-bash scripts/serve_viewer.sh           # sirve en http://127.0.0.1:8779/viewer.html y lo abre
+bash scripts/serve_viewer.sh           # sirve result_model/ en http://127.0.0.1:8779/viewer.html y lo abre
 # (Ctrl-C para parar el servidor al terminar)
 ```
+
+Alternativas sin servidor: `open -a meshlab result_model/scene_textured.obj`, o arrastrar
+`result_model/full2.glb` a <https://modelviewer.dev/editor/> o a Blender (*File ▸ Import ▸ glTF*).
 
 El visor usa `<model-viewer>` (incluido en `../colmap_sneaker/openmvs/model-viewer.min.js`).
 Controles: **arrastrar = girar · rueda = zoom · clic derecho / dos dedos = desplazar**.
