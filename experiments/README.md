@@ -199,6 +199,11 @@ modelo hecho a mano por un artista; es una comparación **visual**, no métrica.
 > **nuestras herramientas** para repetir la prueba (`colmap_sneaker/render_synthetic.py`,
 > `colmap_sneaker/run_colmap_synth.sh` y el preset `synth` de `run_openmvs.sh`).
 
+> 📦 **Paquete reproducible de máxima calidad:** los **pasos exactos, scripts,
+> parámetros, decisiones y la validación completa** (incluido cómo abrir el visor
+> interactivo) del mejor resultado (`full2`) están reunidos en
+> [`max_quality_pipeline/`](./max_quality_pipeline/) — ver su `README.md` y `EVIDENCE.md`.
+
 ---
 
 ## 🔧 Pasos concretos para mejorar el modelo que ya tenemos (avanzado)

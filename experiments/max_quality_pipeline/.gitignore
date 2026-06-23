@@ -1,0 +1,9 @@
+# Reference-derived material (renders/mallas del GLB de retail con copyright):
+# NUNCA se commitea. Solo se guarda en local como evidencia visual.
+evidence_local/*.png
+evidence_local/*.jpg
+evidence_local/*.glb
+evidence_local/*.obj
+evidence_local/*.mtl
+# Cualquier GLB/objeto pesado generado para el visor
+*.glb

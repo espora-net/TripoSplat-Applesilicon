@@ -1,0 +1,40 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sneaker full2 — malla regenerada por fotogrametría (COLMAP→OpenMVS)</title>
+<script type="module" src="./model-viewer.min.js"></script>
+<style>
+  html,body{margin:0;height:100%;background:#1b1d22;font-family:-apple-system,system-ui,sans-serif;color:#e8e8ea}
+  model-viewer{width:100vw;height:100vh;--poster-color:#1b1d22}
+  .bar{position:fixed;top:12px;left:12px;right:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;z-index:10}
+  .bar h1{font-size:13px;font-weight:600;margin:0 12px 0 0;opacity:.92}
+  button{background:#2c2f36;border:1px solid #3a3e47;color:#e8e8ea;border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer}
+  button:hover{background:#363a43}
+  .prov{position:fixed;top:44px;left:12px;max-width:520px;font-size:11px;line-height:1.5;opacity:.72;background:#0d0e11aa;padding:8px 10px;border-radius:8px;border:1px solid #2a2d34}
+  .prov b{color:#7fd6a3}
+  .hint{position:fixed;bottom:12px;left:12px;font-size:11px;opacity:.6}
+</style></head><body>
+<div class="bar">
+  <h1>Sneaker · preset full2 · malla fotogramétrica</h1>
+  <button id="spin">⏯ Auto-giro</button>
+  <button id="reset">⟲ Reiniciar vista</button>
+  <button id="bg">◳ Fondo</button>
+</div>
+<div class="prov">
+  Malla generada <b>desde 108 imágenes 2D</b> por COLMAP→OpenMVS (Apple Silicon, sin CUDA).
+  <b>274.500 vértices / 548.803 caras</b> — topología propia, distinta del modelo de
+  referencia (65.622 / 99.999). Las imágenes de entrada son renders del GLB de referencia
+  (captura idealizada); valida el <b>pipeline</b>, no una adquisición con fotos reales.
+</div>
+<model-viewer id="mv" src="./full2.glb" alt="Sneaker full2 — malla regenerada por fotogrametría"
+  camera-controls pan-controls touch-action="none"
+  interaction-prompt="none" shadow-intensity="1"
+  exposure="1.05" environment-image="neutral" auto-rotate>
+</model-viewer>
+<div class="hint">arrastrar = girar · rueda = zoom · clic derecho / dos dedos = desplazar</div>
+<script>
+  const mv=document.getElementById('mv');let bg=0;
+  document.getElementById('spin').onclick=()=>mv.toggleAttribute('auto-rotate');
+  document.getElementById('reset').onclick=()=>{mv.cameraOrbit='0deg 75deg 105%';mv.fieldOfView='auto';};
+  document.getElementById('bg').onclick=()=>{bg=(bg+1)%3;document.body.style.background=mv.style.background=['#1b1d22','#ffffff','#000000'][bg];};
+</script>
+</body></html>
