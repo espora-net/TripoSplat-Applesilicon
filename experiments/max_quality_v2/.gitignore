@@ -1,0 +1,24 @@
+# Reference-derived material (renders/mallas del GLB de retail con copyright):
+# NUNCA se commitea. Solo se guarda en local como evidencia visual.
+evidence_local/*.png
+evidence_local/*.jpg
+evidence_local/*.glb
+evidence_local/*.obj
+evidence_local/*.mtl
+# Cualquier GLB/objeto pesado generado para el visor
+*.glb
+
+# Imágenes/máscaras de ENTRADA del proceso (renders del GLB de retail con copyright):
+# se guardan en local dentro de input_images/ pero NO se commitean.
+input_images/images/
+input_images/masks/
+input_images/cameras.json
+
+# GLB de referencia de retail (con copyright): local, NUNCA se commitea.
+# (El README.txt de la carpeta sí se versiona para documentar la procedencia.)
+reference_glb/*.glb
+
+# Modelo 3D RESULTADO (derivado del GLB de retail con copyright): local, NO se commitea.
+# Todo result_model/ excepto su README.txt.
+result_model/*
+!result_model/README.txt
