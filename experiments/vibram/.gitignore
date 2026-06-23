@@ -1,0 +1,19 @@
+# --- Vibram/Merrell reconstruction — derived & heavy artifacts (regenerables) ---
+
+# Vídeos de origen: material privado del usuario (y bloqueados por com.apple.macl).
+*.mp4
+
+# Espacio de trabajo completo: fotogramas, máscaras, COLMAP y OpenMVS.
+recon/
+
+# Modelos pesados / atlas del visor (se regeneran con clean_mesh.py / serve_viewer.sh).
+result_model/*
+!result_model/viewer.html
+!result_model/README.txt
+
+# Pesos descargados (rembg u2net).
+*.onnx
+
+# Temporales.
+__pycache__/
+*.pyc
