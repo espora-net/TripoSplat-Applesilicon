@@ -14,7 +14,9 @@ cuello), con calidad **`QUALITY=max`** de OpenMVS, sin CUDA, en un Mac (M3 Pro, 
 > veredicto del rubber-duck (**TRUE-WITH-CAVEATS**), está en [`EVIDENCE.md`](./EVIDENCE.md).
 
 Versión congelada de los scripts: commit **`7558658`**. Los scripts de `scripts/` son
-**copias fijadas** de los que se mantienen en `../colmap_sneaker/` y `../openmvs/`.
+**copias fijadas** de los que se mantienen en `../colmap_sneaker/` y `../openmvs/`
+(incluido `run_colmap_photos.sh`, para replicar el proceso con **tus propias fotos** —
+ver [`REPLICAR_CON_TUS_FOTOS.md`](./REPLICAR_CON_TUS_FOTOS.md)).
 
 ---
 
@@ -52,6 +54,22 @@ Las **108 imágenes de entrada** del proceso completo están en:
 
 Esa carpeta `synthetic_ref/` está **gitignored** (material derivado del GLB de retail con
 copyright; uso estrictamente local como referencia privada). Se regeneran con el paso 3.1.
+
+Para tenerlo todo junto, esas mismas imágenes (y el GLB de referencia) están **copiadas
+dentro de esta carpeta** (local, gitignored por copyright):
+
+```
+input_images/images/        → 108 JPG (las mismas que usó COLMAP)
+input_images/masks/         → 108 PNG (máscaras de primer plano)
+input_images/cameras.json   → poses del rig VTK (registro; el pipeline NO lo usa)
+reference_glb/              → el GLB de retail de referencia (origen de los renders)
+```
+
+> **¿Qué es `cameras.json`?** Lo escribe `render_synthetic.py` (el rig de cámaras VTK) al
+> renderizar: guarda, por vista, la posición de la cámara, el punto al que mira y el `up`,
+> más el `fov_deg` y el tamaño. Son las poses **con las que se renderizó**, un simple
+> registro: **ningún script del pipeline lo lee** (COLMAP estima sus propias cámaras desde
+> las imágenes; por eso registra 97/108, no 108/108).
 
 ---
 
@@ -154,12 +172,35 @@ Malla resultante `full2`: densa **658.601 v / 1.317.166 caras** → refinada **2
 
 ---
 
-## 6. Honestidad / copyright
+## 6. Replicar con tus propias fotos (validar con una captura real)
 
-- El GLB de referencia y **todo** lo derivado (`synthetic_ref/`, `evidence_local/`,
-  `full2.glb`) son **material de retail con copyright**: **estrictamente local y
-  gitignored**, solo como referencia privada de investigación. Solo se commitea
-  **herramienta original** (scripts y documentación).
+Esta carpeta incluye el camino para **reproducir el mismo pipeline con fotos reales**
+tuyas, no con renders. Guía paso a paso en
+[`REPLICAR_CON_TUS_FOTOS.md`](./REPLICAR_CON_TUS_FOTOS.md). Resumen:
+
+```bash
+cd experiments
+# 1) COLMAP sobre TUS fotos (estima cámaras reales con distorsión) -> workspace listo
+bash colmap_sneaker/run_colmap_photos.sh /ruta/a/tus/fotos /ruta/al/ws
+# 2) Malla densa + textura a máxima calidad (mismo OpenMVS, preset nuevo "photos")
+PHOTOS_WS=/ruta/al/ws QUALITY=max bash openmvs/run_openmvs.sh photos
+# 3) Ver el resultado (OBJ -> GLB y abrir el visor, como en la sección 1)
+```
+
+La **clave de la calidad es la captura**: 40–120 fotos dando toda la vuelta, varias alturas,
+mucho solape y **unas cuantas asomándose al interior/huecos** (el equivalente real a los
+anillos `full2` que cierran la cúpula del cuello). Máscaras de primer plano opcionales pero
+recomendadas (`<ws>/masks/<nombre>.png`). Esto **sí** es una adquisición independiente del
+objeto físico (a diferencia del experimento sintético de las secciones anteriores).
+
+---
+
+## 7. Honestidad / copyright
+
+- El GLB de referencia (`reference_glb/`) y **todo** lo derivado (`synthetic_ref/`,
+  `input_images/`, `evidence_local/`, `full2.glb`) son **material de retail con copyright**:
+  **estrictamente local y gitignored**, solo como referencia privada de investigación. Solo
+  se commitea **herramienta original** (scripts y documentación).
 - Comparación **visual**, no métrica. Captura **idealizada** (máscaras exactas, luz
   uniforme). **Circularidad de misma fuente**: las imágenes salen de la misma textura con
   la que comparamos. Ver [`EVIDENCE.md`](./EVIDENCE.md) para el detalle.

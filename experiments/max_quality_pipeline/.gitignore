@@ -7,3 +7,13 @@ evidence_local/*.obj
 evidence_local/*.mtl
 # Cualquier GLB/objeto pesado generado para el visor
 *.glb
+
+# Imágenes/máscaras de ENTRADA del proceso (renders del GLB de retail con copyright):
+# se guardan en local dentro de input_images/ pero NO se commitean.
+input_images/images/
+input_images/masks/
+input_images/cameras.json
+
+# GLB de referencia de retail (con copyright): local, NUNCA se commitea.
+# (El README.txt de la carpeta sí se versiona para documentar la procedencia.)
+reference_glb/*.glb

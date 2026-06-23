@@ -27,6 +27,9 @@
 #   SYNTH_SET=full2 QUALITY=max COLOR_NORM=0 bash run_openmvs.sh synth  # +collar rings (best)
 #                                    # synthetic views of the retail GLB (full|side); see
 #                                    # ../colmap_sneaker run_colmap_synth.sh + README "Part D"
+#   PHOTOS_WS=/path/to/ws QUALITY=max bash run_openmvs.sh photos  # YOUR OWN photos: validate the
+#                                    # pipeline on a real capture (build ws with
+#                                    # ../colmap_sneaker/run_colmap_photos.sh; see max_quality_pipeline/)
 #   OPENMVS_BIN=/path bash run_openmvs.sh <preset>
 #   QUALITY=max  bash run_openmvs.sh <preset>      # full-res densify + full-res refine + colour-norm (best)
 #   QUALITY=high bash run_openmvs.sh <preset>      # full-res densify+refine (most detail)
@@ -98,8 +101,33 @@ case "$PRESET" in
     DENSIFY_MAX=1280
     MASKS_DEFAULT="$SROOT/masks"   # exact z-buffer silhouettes (one per view)
     ;;
+  photos)
+    # --- Replicate the pipeline with YOUR OWN photos (validate on a real capture) ---
+    # Easiest path: first build a COLMAP workspace from your photos with
+    #   bash ../colmap_sneaker/run_colmap_photos.sh /path/to/photos /path/to/ws
+    # then point this preset at it:
+    #   PHOTOS_WS=/path/to/ws QUALITY=max bash run_openmvs.sh photos
+    # $PHOTOS_WS must contain  images/  and  sparse/0/ (the COLMAP model); a
+    # masks/ dir (one <stem>.png per image, black=background) is optional and
+    # improves results. Or set the paths explicitly with COLMAP_MODEL=,
+    # COLMAP_IMAGES=, OUT= (and optionally MASKS=).
+    PHOTOS_WS="${PHOTOS_WS:-}"
+    if [ -n "$PHOTOS_WS" ]; then
+      COLMAP_MODEL="${COLMAP_MODEL:-$PHOTOS_WS/sparse/0}"
+      COLMAP_IMAGES="${COLMAP_IMAGES:-$PHOTOS_WS/images}"
+      OUT="${OUT:-$PHOTOS_WS/openmvs}"
+      MASKS_DEFAULT="$PHOTOS_WS/masks"   # used only if it exists (and MASKS unset)
+    else
+      : "${COLMAP_MODEL:?photos preset: set PHOTOS_WS=/path/to/ws  OR  COLMAP_MODEL=/path/to/sparse/0}"
+      : "${COLMAP_IMAGES:?photos preset: set PHOTOS_WS  OR  COLMAP_IMAGES=/path/to/images}"
+      : "${OUT:?photos preset: set PHOTOS_WS  OR  OUT=/path/to/out}"
+      MASKS_DEFAULT="${MASKS_DEFAULT:-}"
+    fi
+    UNDISTORT_MAX="${UNDISTORT_MAX:-2000}"   # real photos can be large; cap RAM/time on CPU
+    DENSIFY_MAX="${DENSIFY_MAX:-2000}"
+    ;;
   *)
-    echo "usage: bash run_openmvs.sh {sneaker|tripopoor|synth}"; exit 2 ;;
+    echo "usage: bash run_openmvs.sh {sneaker|tripopoor|synth|photos}"; exit 2 ;;
 esac
 
 # ---- quality preset --------------------------------------------------------
