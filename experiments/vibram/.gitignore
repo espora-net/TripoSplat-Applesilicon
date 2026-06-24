@@ -1,15 +1,20 @@
-# --- Vibram/Merrell reconstruction — derived & heavy artifacts (regenerables) ---
+# --- Vibram/Merrell — política de versionado del DATASET (uso académico) ---
+# Ver AVISO.md. Para reproducibilidad y revisión se VERSIONAN: vídeos de origen
+# (*.mp4), fotogramas (recon/images_orig/), máscaras (recon/masks/), modelo SfM en
+# binario (recon/colmap_ws/sparse/0/*.bin), logs y el modelo 3D resultado completo
+# (result_model/). Solo se IGNORAN los intermedios pesados y regenerables (algunos
+# superan el límite de 100 MB por archivo de GitHub):
 
-# Vídeos de origen: material privado del usuario (y bloqueados por com.apple.macl).
-*.mp4
-
-# Espacio de trabajo completo: fotogramas, máscaras, COLMAP y OpenMVS.
-recon/
-
-# Modelos pesados / atlas del visor (se regeneran con clean_mesh.py / serve_viewer.sh).
-result_model/*
-!result_model/viewer.html
-!result_model/README.txt
+# Base de datos de features SIFT de COLMAP (~80 MB, regenerable).
+recon/colmap_ws/database.db
+# Espacio de trabajo de OpenMVS: depth maps (~2 GB), nube densa (135 MB), mallas
+# intermedias, imágenes undistorted… (el resultado final ya vive en result_model/).
+recon/colmap_ws/openmvs/
+# Modelo COLMAP en texto (redundante y voluminoso; los .bin son la fuente canónica).
+recon/colmap_ws/sparse/0/images.txt
+recon/colmap_ws/sparse/0/points3D.txt
+# Enlaces duros de máscaras para COLMAP (se regeneran desde recon/masks/).
+recon/masks_colmap/
 
 # Pesos descargados (rembg u2net).
 *.onnx

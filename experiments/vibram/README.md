@@ -1,5 +1,10 @@
 # Vibram/Merrell — reconstrucción 3D a máxima calidad desde **vídeo propio**
 
+> **📚 Uso académico.** Este conjunto de datos (vídeos, fotogramas, máscaras, modelo
+> SfM y modelo 3D resultado) se publica **exclusivamente con fines académicos y de
+> investigación**. Referencias, atribución y nota de inspiración de calidad en
+> **[AVISO.md](AVISO.md)**.
+
 Reconstrucción fotogramétrica de una zapatilla **Vibram/Merrell real** (la del
 usuario) a partir de **5 vídeos de móvil**, con el mismo pipeline COLMAP→OpenMVS
 a máxima calidad que validamos en los experimentos anteriores, corriendo **nativo
@@ -95,6 +100,8 @@ Cómo grabar tú para máxima calidad (incl. zonas complejas) en
 
 | Archivo | Qué es |
 |---|---|
+| `*.mp4` | Los **5 vídeos de origen** (captura propia del autor) — entrada del proceso |
+| `AVISO.md` | Aviso de **uso académico** + referencias y atribución |
 | `extract_frames.py` | Extracción de fotogramas con filtro de nitidez + transposición del clip vertical |
 | `make_masks_u2net.py` | Máscaras de primer plano: rembg **u2net** + *fallback* por color de suelo + limpieza |
 | `make_masks_color.py` | Segmentador por color de suelo (Mahalanobis en LAB); usado como *fallback* |
@@ -102,11 +109,17 @@ Cómo grabar tú para máxima calidad (incl. zonas complejas) en
 | `clean_mesh.py` | Quita componentes pequeños (floaters) preservando UV; exporta OBJ/GLB |
 | `result_model/` | Modelo autocontenido + visor web (`viewer.html`, `vibram.glb`, OBJ/MTL/atlas) |
 | `evidence/` | Imágenes de evidencia (fotogramas de entrada, máscaras, turntable del resultado) |
-| `recon/` | Espacio de trabajo (fotogramas, máscaras, COLMAP, OpenMVS) — **gitignored**, se regenera |
+| `recon/images_orig/`, `recon/masks/` | **Versionados:** 266 fotogramas + máscaras de entrada |
+| `recon/colmap_ws/sparse/0/*.bin` | **Versionado:** modelo SfM de COLMAP (poses de cámara, nube *sparse*) |
+| `recon/colmap_ws/{database.db, openmvs/}` | Intermedios pesados — **gitignored**, se regeneran |
 
-Los binarios pesados (`recon/`, GLB, OBJ, atlas) están **gitignored**; se regeneran
-con los pasos de arriba. Los **5 vídeos de origen** son material privado del usuario
-y **no se versionan** (además macOS los marca con un ACL `com.apple.macl` que impide
-leerlos fuera de la app que los recibió); viven en local junto a esta carpeta. El
-proceso es **replicable** apuntando los scripts a *tus propios* vídeos —
-ver **[CAPTURA_VIDEO.md](CAPTURA_VIDEO.md)**.
+**Datos versionados (uso académico).** Para reproducibilidad y revisión, esta carpeta
+versiona el **conjunto de datos completo**: los **5 vídeos de origen** (`*.mp4`), los
+**266 fotogramas** (`recon/images_orig/`), las **máscaras** (`recon/masks/`), el
+**modelo SfM** de COLMAP en binario (`recon/colmap_ws/sparse/0/*.bin`), los **logs**
+de ejecución y el **modelo 3D resultado** completo (`result_model/`). Solo se excluyen
+los intermedios pesados y regenerables (base de datos de *features*, depth maps y nube
+densa de OpenMVS; algunos superan el límite de 100 MB por archivo de GitHub). Todo el
+material es **captura propia del autor** (sin copyright de terceros) y se comparte con
+**fines académicos** — ver **[AVISO.md](AVISO.md)**. Replicable con *tus propios*
+vídeos siguiendo **[CAPTURA_VIDEO.md](CAPTURA_VIDEO.md)**.

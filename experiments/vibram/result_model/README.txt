@@ -3,15 +3,16 @@ result_model/ — Modelo 3D reconstruido (Vibram/Merrell) desde vídeo propio
 
 QUÉ HAY AQUÍ
   vibram.glb                  Entregable: malla + textura embebida (glTF binario).
-                              411.322 caras, atlas 4096². ~30 MB. (gitignored)
+                              411.322 caras, atlas 4096². ~30 MB.
   scene_textured.obj/.mtl     Misma malla en OBJ + atlas .jpg (para MeshLab/Blender).
-  scene_textured_*_map_Kd.jpg Atlas de textura (4096²). (gitignored)
-  model-viewer.min.js         Visor web (Google <model-viewer>). (gitignored)
+  scene_textured_*_map_Kd.jpg Atlas de textura (4096²).
+  model-viewer.min.js         Visor web (Google <model-viewer>, Apache-2.0).
   viewer.html                 Página del visor interactivo (versionada).
   README.txt                  Este archivo.
 
-Solo `viewer.html` y este `README.txt` se versionan. El resto son binarios pesados
-DERIVADOS que se regeneran con el pipeline (ver ../README.md y ../EVIDENCE.md).
+Esta carpeta se versiona COMPLETA como parte del conjunto de datos para fines
+académicos/investigación (ver ../AVISO.md). Los binarios pesados son DERIVADOS y se
+pueden regenerar con el pipeline (ver ../README.md y ../EVIDENCE.md).
 
 CÓMO REGENERARLOS
   cd ..                       # experiments/vibram
@@ -30,3 +31,4 @@ ORIGEN (importante)
   vía COLMAP→OpenMVS en Apple Silicon (M3 Pro, sin CUDA). NO se usó ningún GLB de
   retail ni modelo de terceros: sin copyright. Calidad acotada por el origen
   (vídeo 848×478 + compresión WhatsApp + grabado a mano) — ver ../EVIDENCE.md.
+  USO ACADÉMICO / referencias y atribución: ver ../AVISO.md.

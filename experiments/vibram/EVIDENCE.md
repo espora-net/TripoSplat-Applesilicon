@@ -8,8 +8,8 @@ decisiones. Hardware: **Apple M3 Pro, 36 GB, macOS, sin CUDA**. COLMAP 4.0.4
 
 ## 0. Entrada — 5 vídeos de móvil (captura propia)
 
-5 clips de WhatsApp, H.264, 30 fps. **No** se versionan (privados del usuario y
-bloqueados por el ACL `com.apple.macl` de macOS); especificaciones tomadas de la
+5 clips de WhatsApp, H.264, 30 fps. Se **versionan** como parte del conjunto de datos
+para uso académico (ver [AVISO.md](AVISO.md)); especificaciones tomadas de la
 extracción:
 
 | Clip | Fichero | Resolución | Dur. | Toma |
